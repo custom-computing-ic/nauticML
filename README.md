@@ -153,23 +153,3 @@ To use GPU acceleration:
    experiment:
      gpus: [0, 1]  # Use GPU 0 and 1
    ```
-3. Install CUDA-compatible TensorFlow
-
-## Development
-
-### Creating Custom Models
-
-Add model definitions to `logic/models/` or `logic/models2/` and reference them in `config.yaml`.
-
-### Extending the Optimization Space
-
-Modify the `bayes_opt.tunable` section in `config.yaml` to add new hyperparameters:
-
-```yaml
-bayes_opt:
-  tunable:
-    new_param:
-      value: <current_value>
-      space: [<min>, <max>, ...]
-```
-
