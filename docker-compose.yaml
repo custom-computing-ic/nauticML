@@ -1,0 +1,29 @@
+services:
+  db:
+    image: postgres:17
+    environment:
+      POSTGRES_USER: prefect
+      POSTGRES_PASSWORD: prefect
+      POSTGRES_DB: prefect
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  prefect-server:
+    image: prefecthq/prefect:3.4.6-python3.11  # Use latest compatible version
+    depends_on:
+      - db
+    volumes:
+      - prefect:/root/.prefect
+    environment:
+      PREFECT_API_DATABASE_CONNECTION_URL: postgresql+asyncpg://prefect:prefect@db:5432/prefect
+      PREFECT_SERVER_API_HOST: 0.0.0.0
+      PREFECT_UI_API_URL: http://localhost:4200/api
+
+    entrypoint: ["prefect", "server", "start"]
+
+    ports:
+      - "4200:4200"
+
+volumes:
+  pgdata:
+  prefect:

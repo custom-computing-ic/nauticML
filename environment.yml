@@ -1,0 +1,16 @@
+---
+name: nauticML
+
+channels:
+  - conda-forge
+
+dependencies:
+  - python=3.11
+  # cannot install tensorflow using pip, it is not compatible with cuda drivers
+  - tensorflow=2.12
+  - nvidia/label/cuda-11.8.0::cuda-nvcc
+  - nvidia/label/cuda-11.8.0::cuda-toolkit
+  - pip
+  - pip:
+      - -r requirements.txt
+

@@ -1,0 +1,14 @@
+pydantic
+git+https://github.com/hmarkc/hls4ml@8db496e63e03fd1c9f7c88ca262015257d739adf#egg=hls4ml
+pyyaml
+bayesian-optimization
+qkeras
+pandas
+sympy
+tensorflow_probability==0.16.0
+pyparsing
+prefect
+#sacred
+#keras-flops
+#tf_keras
+
