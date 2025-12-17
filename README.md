@@ -35,7 +35,7 @@ An orchestration framework for co-optimizing neural network models on hardware p
    
    Use Docker Compose to launch the Prefect server and PostgreSQL database:
    ```bash
-   docker-compose up -d
+   docker compose up -d
    ```
 
    This will start:
