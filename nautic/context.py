@@ -4,9 +4,11 @@ import yaml
 from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, create_model
 from colorama import Fore, Style
+
 from .engine import Engine
-from .flowx import flowx_cfg
-from .taskx import taskx_cfg
+
+from nautic.config import flowx_cfg
+from nautic.config import taskx_cfg
 
 # Simple wrapper for scalar alias values
 class AliasRef:
