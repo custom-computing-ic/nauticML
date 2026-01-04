@@ -51,9 +51,13 @@ class KerasExperiment:
         ctx.experiment.ckpt_file = os.path.join(ctx.experiment.save_dir, ctx.experiment.ckpt_file)
 
         seed = ctx.experiment.seed
+
+        # TODO: add randomisation for tf env vars
         os.environ['PYTHONHASHSEED'] = str(seed)
+
         random.seed(seed)
         np.random.seed(seed)
+
         tf.keras.utils.set_random_seed(seed)
         tf.random.set_seed(seed)
 

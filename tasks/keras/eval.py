@@ -13,9 +13,28 @@ class KerasEval:
     @taskx
     def eval(ctx):
         ctx.eval.accuracy = KerasEval.evaluate_accuracy(ctx)
-        #flops1 = KerasEval.eval_flop(ctx, True)
-        flops2 = KerasEval.eval_flop(ctx)
-        #print(f"FLOPS with batch size A: {flops1}, with batch size B: {flops2}")
+        ctx.eval.ece = KerasEval.evaluate_ece(ctx)
+        ctx.eval.ape = KerasEval.evaluate_ape(ctx)
+        ctx.eval.flops = KerasEval.evaluate_flops(ctx)
+
+    def evaluate_ape(ctx) -> float:
+
+        return 0.0
+
+    def evaluate_ece(ctx) -> float:
+        def entropy(output):
+            batch_size = output.shape[0]
+            entropy = -np.sum(np.log(output+1e-8)*output)/batch_size
+            return entropy
+
+        x = ctx.dataset.data["x_test"]
+
+        mean = x.mean(axis=(0, 1, 2), keepdims=True)
+        std = x.std(axis=(0, 1, 2), keepdims=True)
+
+        x_noise = np.random.normal(mean, std, size=x.shape).astype(x.dtype)
+
+        return entropy(ctx.model.logic.predict(np.ascontiguousarray(x_noise)))
 
     def evaluate_accuracy(ctx):
 
@@ -30,7 +49,7 @@ class KerasEval:
         return accuracy
 
 
-    def eval_flop(ctx):
+    def evaluate_flops(ctx):
         """
         Calculate FLOPS for tf.keras.Model or tf.keras.Sequential .
         Ignore operations used in only training mode such as Initialization.
@@ -48,6 +67,7 @@ class KerasEval:
         inputs = [
             tf.TensorSpec([batch_size] + inp.shape[1:], inp.dtype) for inp in model.inputs
         ]
+
         real_model = tf.function(model).get_concrete_function(inputs)
         frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
 

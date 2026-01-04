@@ -41,10 +41,9 @@ class KerasModels:
         ctx.model.original = clone_model(ctx.model.logic)
 
 
-
         KerasModels.prune(ctx)
 
-
+    @staticmethod
     def prune(ctx):
         if ctx.model.p_rate == 0.0:
             return

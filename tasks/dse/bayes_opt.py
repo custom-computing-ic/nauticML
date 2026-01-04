@@ -17,6 +17,7 @@ class BayesOpt:
             tune_vals = { }
             tune_space = { }
             bo.control.params = { }
+            
             for key in bo.tunable.model_fields:
                 opt = getattr(bo.tunable, key)
                 if isinstance(opt.space, list):
@@ -26,6 +27,7 @@ class BayesOpt:
 
                 tune_vals[key] = opt.value
                 tune_space[key] = opt.space
+                
             bo.control.params['values'] = tune_vals
             bo.control.params['space'] = tune_space
 

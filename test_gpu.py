@@ -13,3 +13,4 @@ if gpus:
         print("Result of matrix multiplication on GPU:\n", c.numpy())
 else:
     print("No GPU found. Running on CPU.")
+
