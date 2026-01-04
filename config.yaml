@@ -9,6 +9,8 @@ experiment:
 dataset:
   name: mnist
   data: <dict>
+  mean: 0.0
+  std: 1.0
 
 model:
   original: <obj>
@@ -53,7 +55,7 @@ bayes_opt:
     accuracy: ((eval.accuracy))
     ece: ((eval.ece))
     aPE: ((eval.ape))
-    FLOP: ((eval.flop))
+    FLOP: ((eval.flops))
 
   score_weights:
     accuracy:
@@ -82,7 +84,7 @@ eval:
   ece: <float>
   ape: <float>
   accuracy: <float>
-  flop: <float>
+  flops: <float>
 
   mc_samples: 5
   num_eval_images: 200

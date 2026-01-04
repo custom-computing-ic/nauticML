@@ -51,20 +51,8 @@ def perform_optimization(ctx):
             ece: {ctx.eval.ece}
             ape: {ctx.eval.ape}
             accuracy: {ctx.eval.accuracy}
-            flop: {ctx.eval.flop}""")
-
-
-# ctx.eval.ece = 10
-# ctx.eval.ape = 20
-
-# ctx.eval.flop = 1000
+            flops: {ctx.eval.flops}""")
 
 if __name__ == "__main__":
     perform_optimization(ctx)
-
-
-
-
-
-
 

@@ -3,6 +3,7 @@ from bayes_opt import BayesianOptimization
 from nautic import taskx
 
 class BayesOpt:
+    # TODO: now bo just doesnt use the stuff to acc update shit
     @taskx
     def bayesian_opt(ctx):
         bo = ctx.bayes_opt

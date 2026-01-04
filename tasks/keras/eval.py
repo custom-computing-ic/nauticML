@@ -2,6 +2,7 @@
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
+import tensorflow_probability as tfp
 from tensorflow.python.framework.convert_to_constants import (
     convert_variables_to_constants_v2_as_graph,
 )
@@ -12,35 +13,35 @@ class KerasEval:
 
     @taskx
     def eval(ctx):
-        ctx.eval.accuracy = KerasEval.evaluate_accuracy(ctx)
-        ctx.eval.ece = KerasEval.evaluate_ece(ctx)
-        ctx.eval.ape = KerasEval.evaluate_ape(ctx)
+        model = load_model(ctx.experiment.ckpt_file)
+        y_prob = model.predict(ctx.dataset.data["x_test"])
+
+        ctx.eval.accuracy = KerasEval.evaluate_accuracy(ctx, y_prob)
+        ctx.eval.ece = KerasEval.evaluate_ece(ctx, y_prob)
+        ctx.eval.ape = KerasEval.evaluate_ape(ctx, model)
         ctx.eval.flops = KerasEval.evaluate_flops(ctx)
 
-    def evaluate_ape(ctx) -> float:
+    def evaluate_ece(ctx, y_prob) -> float:
+        y_logits    = np.log(y_prob/(1-y_prob + 1e-15))
+        ece_keras   = tfp.stats.expected_calibration_error(num_bins=ctx.eval.num_bins,
+            logits=y_logits, labels_true=np.argmax(ctx.dataset.data["y_test"],axis=1), labels_predicted=np.argmax(y_prob,axis=1))
+        
+        return float(ece_keras)
 
-        return 0.0
-
-    def evaluate_ece(ctx) -> float:
+    def evaluate_ape(ctx, model) -> float:
         def entropy(output):
             batch_size = output.shape[0]
             entropy = -np.sum(np.log(output+1e-8)*output)/batch_size
             return entropy
 
-        x = ctx.dataset.data["x_test"]
+        x = ctx.dataset.data["x_train"]
 
-        mean = x.mean(axis=(0, 1, 2), keepdims=True)
-        std = x.std(axis=(0, 1, 2), keepdims=True)
+        # TODO: ask about mean - should be hard-coded?
+        x_noise = np.random.normal(ctx.dataset.mean, ctx.dataset.std, size=x.shape).astype(x.dtype)
 
-        x_noise = np.random.normal(mean, std, size=x.shape).astype(x.dtype)
+        return entropy(model.predict(np.ascontiguousarray(x_noise)))
 
-        return entropy(ctx.model.logic.predict(np.ascontiguousarray(x_noise)))
-
-    def evaluate_accuracy(ctx):
-
-        model = load_model(ctx.experiment.ckpt_file)
-        y_prob = model.predict(ctx.dataset.data["x_test"])
-
+    def evaluate_accuracy(ctx, y_prob):
         accuracy = float(accuracy_score(
             np.argmax(ctx.dataset.data["y_test"], axis=1),
             np.argmax(y_prob, axis=1)
