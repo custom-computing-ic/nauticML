@@ -35,7 +35,7 @@ bayes_opt:
     metrics: dict
     suggests: dict
 
-  num_iter: 3
+  num_iter: 20
   seed: ((experiment.seed))
   tunable:
     dropout_rate:

@@ -51,7 +51,7 @@ class BayesOpt:
             )
 
             # Initial random points
-            for _ in range(1):
+            for _ in range(3):
                 bo.control.suggests = dict(zip(pbounds.keys(),
                                                bo.engine._space.random_sample()))
         else:
@@ -88,7 +88,11 @@ class BayesOpt:
 
         bo.terminate = not (bo.iteration < bo.num_iter)
 
-
+        # TODO: make programmatic like above
+        ctx.model.dropout_rate = summary["dropout_rate"]
+        ctx.model.scale_factor = summary["scale_factor"]
+        ctx.model.p_rate = summary["p_rate"]
+        ctx.model.num_bayes_layer = summary["num_bayes_layer"]
 
 
         # cfg.model.dropout_rate = cfg.search_space.dropout_rate_list[int(tune_params["dropout_rate"])]
