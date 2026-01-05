@@ -28,6 +28,7 @@ def perform_optimization(ctx):
     engine.keras.get_dataset()
 
     while True:
+        # think about triggers
         engine.dse.bayesian_opt()
         if ctx.bayes_opt.terminate:
             break
@@ -38,15 +39,17 @@ def perform_optimization(ctx):
         engine.keras.eval()
         #print("Accuracy:", ctx.eval.accuracy)
         #engine.keras.trust.eval()
+    
+    best_summary = max(ctx.bayes_opt.summary, key=lambda x: x["score"])
 
-    print(f"""
+    log.info(f"""
           Final parameters:
-                droupout rate: {ctx.model.dropout_rate}
-                p rate: {ctx.model.p_rate}
-                scale factor: {ctx.model.scale_factor}
-                num bayes later: {ctx.model.num_bayes_layer}""")
+                droupout rate: {best_summary["dropout_rate"]}
+                p rate: {best_summary["p_rate"]}
+                scale factor: {best_summary["scale_factor"]}
+                num bayes later: {best_summary["num_bayes_layer"]}""")
 
-    print(f"""
+    log.info(f"""
           With performance metrics:
             ece: {ctx.eval.ece}
             ape: {ctx.eval.ape}

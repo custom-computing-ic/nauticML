@@ -2,8 +2,10 @@ import pandas as pd
 from bayes_opt import BayesianOptimization
 from nautic import taskx
 
+#TODO: get the best params from the bo engine to display (using logs),
+# understand when the summary acc gets added to the thingo - after score is calculated, so should we also update the summary with the score and all the metrics logged for further reference?
+
 class BayesOpt:
-    # TODO: now bo just doesnt use the stuff to acc update shit
     @taskx
     def bayesian_opt(ctx):
         bo = ctx.bayes_opt
@@ -51,11 +53,10 @@ class BayesOpt:
             )
 
             # Initial random points
-            for _ in range(3):
+            for _ in range(1):
                 bo.control.suggests = dict(zip(pbounds.keys(),
                                                bo.engine._space.random_sample()))
         else:
-            bo.iteration += 1
             engine = bo.engine
 
             score = 0
@@ -67,33 +68,42 @@ class BayesOpt:
                 score += float(metric_value / base_value) * float(weight_value)
 
             bo.score = score
+
+            # record a summary for this bo iteration (can extract to function)
+            summary = { 'iteration': bo.iteration, 'score': round(score, 4) }
+
+            # set the parameters for other tasks
+            for key, value in bo.control.suggests.items():
+                idx = int(value)
+                metric_val = bo.control.params['space'][key][idx]
+                summary[key] = metric_val
+                
+            bo.summary.append(summary)
+            log.artifact(key='bayes-iteration-summary',
+                        table=bo.summary)
+
             engine.register(params=bo.control.suggests,
                             target=bo.score)
+
+            bo.iteration += 1
             bo.control.suggests = bo.engine.suggest()
-
-        summary = { 'iteration': bo.iteration,
-                    'score': "n/a" if bo.score is None else round(bo.score, 4)}
-
-        # set the parameters for other tasks
-        for key, value in bo.control.suggests.items():
-            idx = int(value)
-            metric_val = bo.control.params['space'][key][idx]
-            summary[key] = metric_val
-            bo.control.params['values'][key].set(metric_val)
-
-        bo.summary.append(summary)
-        log.artifact(key='bayes-iteration-summary',
-                     table=bo.summary)
-
 
         bo.terminate = not (bo.iteration < bo.num_iter)
 
-        # TODO: make programmatic like above
-        ctx.model.dropout_rate = summary["dropout_rate"]
-        ctx.model.scale_factor = summary["scale_factor"]
-        ctx.model.p_rate = summary["p_rate"]
-        ctx.model.num_bayes_layer = summary["num_bayes_layer"]
+        metric_values = {}
 
+        for key, value in bo.control.suggests.items():
+            idx = int(value)
+            metric_val = bo.control.params['space'][key][idx]
+            metric_values[key] = metric_val   
+
+            bo.control.params['values'][key].set(metric_val)
+
+        # TODO: make programmatic like above or move to another step
+        ctx.model.dropout_rate = metric_values["dropout_rate"]
+        ctx.model.scale_factor = metric_values["scale_factor"]
+        ctx.model.p_rate = metric_values["p_rate"]
+        ctx.model.num_bayes_layer = metric_values["num_bayes_layer"]
 
         # cfg.model.dropout_rate = cfg.search_space.dropout_rate_list[int(tune_params["dropout_rate"])]
         # cfg.model.p_rate = cfg.search_space.p_rate_list[int(tune_params["p_rate"])]
