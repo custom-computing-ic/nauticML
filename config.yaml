@@ -23,7 +23,6 @@ model:
   dropout_type: mc
   num_bayes_layer: 3
 
-
 bayes_opt:
   iteration: <int>
   terminate: <bool>
