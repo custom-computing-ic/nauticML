@@ -62,7 +62,6 @@ class AliasRef:
     def __repr__(self):
         return f"AliasRef(src={self.src} => target={self.target}"
 
-
 # This class is responsible to parse the yaml file into a python object
 class Context:
     # Type mapping for explicit string declarations
@@ -103,7 +102,6 @@ class Context:
 
             # inject placeolders for the keywords
             raw_yaml[kw] = '<obj>'
-
 
 
         model_builder = Context.__build_model("Context", raw_yaml)

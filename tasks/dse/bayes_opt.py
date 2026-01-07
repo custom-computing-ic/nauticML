@@ -1,8 +1,7 @@
-import pandas as pd
 from bayes_opt import BayesianOptimization
 from nautic import taskx
 
-#TODO: get the best params from the bo engine to display (using logs),
+# TODO: get the best params from the bo engine to display (using logs),
 # understand when the summary acc gets added to the thingo - after score is calculated, so should we also update the summary with the score and all the metrics logged for further reference?
 
 class BayesOpt:
@@ -52,10 +51,20 @@ class BayesOpt:
                 allow_duplicate_points=True
             )
 
-            # Initial random points
+            # Initial random points, use rng to make deterministic
+            rng = bo.engine._random_state                      
+
             for _ in range(1):
-                bo.control.suggests = dict(zip(pbounds.keys(),
-                                               bo.engine._space.random_sample()))
+                bo.control.suggests = dict(
+                zip(
+                    pbounds.keys(),
+                    rng.uniform(
+                        bo.engine._space.bounds[:, 0],
+                        bo.engine._space.bounds[:, 1]
+                    )
+                )
+            )
+                
         else:
             engine = bo.engine
 
@@ -133,4 +142,3 @@ class BayesOpt:
         #     description="Bayesian Optimization Step Summary"
         # )
         # return cfg
-
