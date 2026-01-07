@@ -1,4 +1,5 @@
 import os
+from typing import List
 import tensorflow as tf
 import random
 import numpy as np
@@ -8,7 +9,7 @@ class KerasExperiment:
 
     @taskx
     def initialize_experiment(ctx):
-        def configure_gpus(gpu_indices):
+        def configure_gpus(use_cpu: bool, gpu_indices : List[int] | None):
             """
             Configures TensorFlow to use only the specified GPU indices.
 
@@ -16,6 +17,16 @@ class KerasExperiment:
                 gpu_indices (list of int): List of GPU indices to make visible to TensorFlow.
                                         Use an empty list to disable GPU usage.
             """
+            if use_cpu:
+                try:
+                    # Make no GPUs visible (force CPU mode)
+                    tf.config.set_visible_devices([], 'GPU')
+                    print("🚫 GPU usage disabled — running on CPU only.")
+                except RuntimeError as e:
+                    print("❌ RuntimeError while disabling GPU:", e)
+                finally:
+                    return
+
             gpus = tf.config.list_physical_devices('GPU')
 
             log = ctx.log
@@ -27,7 +38,7 @@ class KerasExperiment:
             else:
                 log.debug(f"Found {len(gpus)} GPU(s): {[gpu.name for gpu in gpus]}")
 
-            if gpu_indices:
+            if len(gpu_indices) > 0:
                 try:
                     selected_gpus = [gpus[i] for i in gpu_indices]
                     tf.config.set_visible_devices(selected_gpus, 'GPU')
@@ -39,12 +50,8 @@ class KerasExperiment:
                 except RuntimeError as e:
                     print("❌ RuntimeError during GPU configuration:", e)
             else:
-                try:
-                    # Make no GPUs visible (force CPU mode)
-                    tf.config.set_visible_devices([], 'GPU')
-                    print("🚫 GPU usage disabled — running on CPU only.")
-                except RuntimeError as e:
-                    print("❌ RuntimeError while disabling GPU:", e)
+                log.warning("⚠️ CPU used by default as no CPU or GPU indices provided are empty")
+                return configure_gpus(True, [])
 
         os.makedirs(ctx.experiment.save_dir, exist_ok=True)
         ctx.experiment.save_dir = os.path.abspath(ctx.experiment.save_dir)
@@ -61,5 +68,5 @@ class KerasExperiment:
         tf.keras.utils.set_random_seed(seed)
         tf.random.set_seed(seed)
 
-        configure_gpus(ctx.experiment.gpus)
-
+        use_cpu = getattr(ctx.experiment, "cpu", False)
+        configure_gpus(use_cpu, getattr(ctx.experiment, "gpus", []))
