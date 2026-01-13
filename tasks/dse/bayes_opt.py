@@ -67,13 +67,16 @@ class BayesOpt:
             bo.score = score
 
             # record a summary for this bo iteration (can extract to function)
-            summary = { 'iteration': bo.iteration, 'score': round(score, 4) }
-
-            # set the parameters for other tasks
-            for key, value in bo.control.suggests.items():
-                idx = int(value)
-                metric_val = bo.control.params['space'][key][idx]
-                summary[key] = metric_val
+            summary = { 
+                'iteration': bo.iteration, 
+                'score': round(score, 4),
+                'accuracy': round(bo.metrics.accuracy.get(), 4),
+                'ece': round(bo.metrics.ece.get(), 4),
+                'ape': round(bo.metrics.aPE.get(), 4),
+                'flops': round(bo.metrics.FLOP.get(), 4)
+            }
+            
+            summary.update(BayesOpt.suggest_to_values(bo))
                 
             bo.summary.append(summary)
             log.artifact(key='bayes-iteration-summary',
@@ -87,6 +90,14 @@ class BayesOpt:
 
         bo.terminate = not (bo.iteration < bo.num_iter)
 
+        metric_values = BayesOpt.suggest_to_values(bo)
+
+        # update the refs to reflect the new values
+        for key, value in metric_values.items():
+            bo.control.params['values'][key].set(value)
+
+    @staticmethod
+    def suggest_to_values(bo):
         metric_values = {}
 
         for key, value in bo.control.suggests.items():
@@ -94,27 +105,9 @@ class BayesOpt:
             metric_val = bo.control.params['space'][key][idx]
             metric_values[key] = metric_val   
 
-            bo.control.params['values'][key].set(metric_val)
-    
-    @taskx
-    def next_strategy(ctx):
-        curr_index = ctx.bayes_opt.curr_strategy
-
-        if curr_index < len(ctx.bayes_opt.strategies):
-            ctx.bayes_opt.curr_strategy += 1
-
-        # TODO: make programmatic like above or move to another step
-        # ctx.model.dropout_rate = metric_values["dropout_rate"]
-        # ctx.model.scale_factor = metric_values["scale_factor"]
-        # ctx.model.p_rate = metric_values["p_rate"]
-        # ctx.model.num_bayes_layer = metric_values["num_bayes_layer"]
-
-        # cfg.model.dropout_rate = cfg.search_space.dropout_rate_list[int(tune_params["dropout_rate"])]
-        # cfg.model.p_rate = cfg.search_space.p_rate_list[int(tune_params["p_rate"])]
-        # cfg.model.num_bayes_layer =  cfg.search_space.num_bayes_layer_list[int(tune_params["num_bayes_layer"])]
-        # cfg.model.scale_factor = cfg.search_space.scale_factor_list[int(tune_params["scale_factor"])]
-
-
+        return metric_values       
+       
+       
         # # Create a table artifact
         # create_table_artifact(
         #     key=f"bayes-iteration-{cfg.bayes_opt.iteration}",

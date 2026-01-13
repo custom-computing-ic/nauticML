@@ -24,23 +24,6 @@ model:
   dropout_type: mc
   num_bayes_layer: 3
 
-results:
-  summaries: ((bayes_opt.summary))
-
-S1:
-  strategy:
-    accuracy: 0.25
-    ece: -0.25
-    ape: 0.25
-    flops: -0.25
-
-S2:
-  strategy:
-    accuracy: 0.75
-    ece: 0.00
-    ape: 0.00
-    flops: -0.25
-
 bayes_opt:
   iteration: <int>
   terminate: <bool>

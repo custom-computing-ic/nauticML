@@ -51,10 +51,10 @@ def perform_optimization(ctx):
 
     log.info(f"""
           With performance metrics:
-            ece: {ctx.eval.ece}
-            ape: {ctx.eval.ape}
-            accuracy: {ctx.eval.accuracy}
-            flops: {ctx.eval.flops}""")
+            ece: {best_summary["ece"]}
+            ape: {best_summary["ape"]}
+            accuracy: {best_summary["accuracy"]}
+            flops: {best_summary["flops"]}""")
 
 if __name__ == "__main__":
     perform_optimization(ctx)

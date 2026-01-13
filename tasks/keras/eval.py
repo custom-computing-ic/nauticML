@@ -49,7 +49,6 @@ class KerasEval:
 
         return accuracy
 
-
     def evaluate_flops(ctx):
         """
         Calculate FLOPS for tf.keras.Model or tf.keras.Sequential .
