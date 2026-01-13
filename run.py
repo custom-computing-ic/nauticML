@@ -37,9 +37,9 @@ def perform_optimization(ctx):
         engine.keras.trust.build_bayesian_model()
         engine.keras.train_model()
         engine.keras.eval()
-        #print("Accuracy:", ctx.eval.accuracy)
-        #engine.keras.trust.eval()
     
+    engine.dse.create_pareto_figures()
+     
     best_summary = max(ctx.bayes_opt.summary, key=lambda x: x["score"])
 
     log.info(f"""

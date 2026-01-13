@@ -1,4 +1,5 @@
 ---
+
 experiment:
   seed: 42
   save_dir: ./results
@@ -23,6 +24,22 @@ model:
   dropout_type: mc
   num_bayes_layer: 3
 
+results:
+  summaries: ((bayes_opt.summary))
+
+S1:
+  strategy:
+    accuracy: 0.25
+    ece: -0.25
+    ape: 0.25
+    flops: -0.25
+
+S2:
+  strategy:
+    accuracy: 0.75
+    ece: 0.00
+    ape: 0.00
+    flops: -0.25
 
 bayes_opt:
   iteration: <int>
@@ -30,6 +47,20 @@ bayes_opt:
   engine: <obj>
   score: <float>
   summary: <list>
+  
+  strategies: [
+    ((S1.strategy)),
+    ((S2.strategy))
+  ]
+
+  curr_strategy: 0
+  
+  score_base:
+    accuracy: 0.99
+    ece: 0.03
+    aPE: 1.5
+    FLOP: 5340192
+  
   control:
     params: dict
     metrics: dict
@@ -60,19 +91,6 @@ bayes_opt:
     aPE: ((eval.ape))
     FLOP: ((eval.flops))
 
-  score_weights:
-    accuracy:
-      weight: 0.25
-      base: 0.99
-    ece:
-      weight: -0.25
-      base: 0.03
-    aPE:
-      weight: 0.25
-      base: 1.5
-    FLOP:
-      weight: -0.25
-      base: 5340192
 
 
 train:

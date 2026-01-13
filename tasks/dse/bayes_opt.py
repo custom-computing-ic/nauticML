@@ -40,11 +40,6 @@ class BayesOpt:
                 metrics_values[key] = getattr(bo.metrics, key)
             bo.control.metrics['values'] = metrics_values
 
-            score_weights = { }
-            for key in bo.score_weights.model_fields:
-                score_weights[key] = getattr(bo.score_weights, key)
-            bo.control.metrics['score_weights'] = score_weights
-
             bo.engine = BayesianOptimization(
                 f = None,
                 pbounds=pbounds,
@@ -58,12 +53,14 @@ class BayesOpt:
                                                bo.engine._space.random_sample()))
         else:
             engine = bo.engine
+            curr_strategy = bo.strategies[bo.curr_strategy].get()
 
             score = 0
-            for key in bo.control.metrics['values']:
-                metric_value = bo.control.metrics['values'][key].get()
-                base_value = bo.control.metrics['score_weights'][key].base
-                weight_value = bo.control.metrics['score_weights'][key].weight
+            for metric in bo.control.metrics['values']:
+                metric_value = bo.control.metrics['values'][metric].get()
+
+                base_value = curr_strategy[metric]
+                weight_value = bo.control.metrics['score_base'][metric]
 
                 score += float(metric_value / base_value) * float(weight_value)
 
@@ -98,12 +95,19 @@ class BayesOpt:
             metric_values[key] = metric_val   
 
             bo.control.params['values'][key].set(metric_val)
+    
+    @taskx
+    def next_strategy(ctx):
+        curr_index = ctx.bayes_opt.curr_strategy
+
+        if curr_index < len(ctx.bayes_opt.strategies):
+            ctx.bayes_opt.curr_strategy += 1
 
         # TODO: make programmatic like above or move to another step
-        ctx.model.dropout_rate = metric_values["dropout_rate"]
-        ctx.model.scale_factor = metric_values["scale_factor"]
-        ctx.model.p_rate = metric_values["p_rate"]
-        ctx.model.num_bayes_layer = metric_values["num_bayes_layer"]
+        # ctx.model.dropout_rate = metric_values["dropout_rate"]
+        # ctx.model.scale_factor = metric_values["scale_factor"]
+        # ctx.model.p_rate = metric_values["p_rate"]
+        # ctx.model.num_bayes_layer = metric_values["num_bayes_layer"]
 
         # cfg.model.dropout_rate = cfg.search_space.dropout_rate_list[int(tune_params["dropout_rate"])]
         # cfg.model.p_rate = cfg.search_space.p_rate_list[int(tune_params["p_rate"])]
