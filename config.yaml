@@ -24,6 +24,35 @@ model:
   dropout_type: mc
   num_bayes_layer: 3
 
+# NOTE: introduce typing so that we can type dictionaries too
+S1:
+  accuracy: 
+    weight: 0.25
+    base: 0.99
+  ece: 
+    weight: -0.25
+    base: 0.03
+  ape: 
+    weight: 0.25
+    base: 1.5
+  flops: 
+    weight: -0.25
+    base: 5340192
+
+S2:
+  accuracy: 
+    weight: 0.75
+    base: 0.99
+  ece: 
+    weight: 0.00
+    base: 0.03
+  ape: 
+    weight: 0.00
+    base: 1.5
+  flops: 
+    weight: -0.25
+    base: 5340192
+
 bayes_opt:
   iteration: <int>
   terminate: <bool>
@@ -31,22 +60,11 @@ bayes_opt:
   score: <float>
   summary: <list>
   
-  strategies: [
-    ((S1.strategy)),
-    ((S2.strategy))
-  ]
-
+  strategies: [ S1, S2 ]
   curr_strategy: 0
-  
-  score_base:
-    accuracy: 0.99
-    ece: 0.03
-    aPE: 1.5
-    FLOP: 5340192
-  
+
   control:
     params: dict
-    metrics: dict
     suggests: dict
 
   num_iter: 3
@@ -71,10 +89,8 @@ bayes_opt:
   metrics:
     accuracy: ((eval.accuracy))
     ece: ((eval.ece))
-    aPE: ((eval.ape))
-    FLOP: ((eval.flops))
-
-
+    ape: ((eval.ape))
+    flops: ((eval.flops))
 
 train:
   optimizer: <obj>

@@ -34,11 +34,9 @@ class BayesOpt:
             bo.control.params['values'] = tune_vals
             bo.control.params['space'] = tune_space
 
-            bo.control.metrics = {}
-            metrics_values = {}
-            for key in bo.metrics.model_fields:
-                metrics_values[key] = getattr(bo.metrics, key)
-            bo.control.metrics['values'] = metrics_values
+            # NOTE: could make AliasRef accept dictionaries instead
+            # set the actual strategy dict for each strategy string reference inside of bo.strategies
+            bo.strategies = [getattr(ctx, s) for s in bo.strategies]
 
             bo.engine = BayesianOptimization(
                 f = None,
@@ -53,29 +51,23 @@ class BayesOpt:
                                                bo.engine._space.random_sample()))
         else:
             engine = bo.engine
-            curr_strategy = bo.strategies[bo.curr_strategy].get()
+            curr_strategy = bo.strategies[bo.curr_strategy]
 
             score = 0
-            for metric in bo.control.metrics['values']:
-                metric_value = bo.control.metrics['values'][metric].get()
+            summary = {
+                'iteration': bo.iteration
+            }
+            
+            for metric in bo.metrics.model_fields:
+                metric_value = getattr(bo.metrics, metric).get()
+                curr_metric_params = getattr(curr_strategy, metric)
 
-                base_value = curr_strategy[metric]
-                weight_value = bo.control.metrics['score_base'][metric]
-
-                score += float(metric_value / base_value) * float(weight_value)
+                score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
+                summary[metric] = round(metric_value, 4)
 
             bo.score = score
 
-            # record a summary for this bo iteration (can extract to function)
-            summary = { 
-                'iteration': bo.iteration, 
-                'score': round(score, 4),
-                'accuracy': round(bo.metrics.accuracy.get(), 4),
-                'ece': round(bo.metrics.ece.get(), 4),
-                'ape': round(bo.metrics.aPE.get(), 4),
-                'flops': round(bo.metrics.FLOP.get(), 4)
-            }
-            
+            summary['score'] = score
             summary.update(BayesOpt.suggest_to_values(bo))
                 
             bo.summary.append(summary)
@@ -96,16 +88,16 @@ class BayesOpt:
         for key, value in metric_values.items():
             bo.control.params['values'][key].set(value)
 
+    # This method converts the suggest into a dictionary of hyper-parameters
     @staticmethod
     def suggest_to_values(bo):
-        metric_values = {}
+        hyperparams = {}
 
         for key, value in bo.control.suggests.items():
             idx = int(value)
-            metric_val = bo.control.params['space'][key][idx]
-            metric_values[key] = metric_val   
+            hyperparams[key] = bo.control.params['space'][key][idx]
 
-        return metric_values       
+        return hyperparams       
        
        
         # # Create a table artifact
