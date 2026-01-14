@@ -52,6 +52,11 @@ S2:
   flops: 
     weight: -0.25
     base: 5340192
+  
+strategy:
+  strategies: [ S1, S2 ]
+  curr_strategy: <int>
+  terminate_strategies: <bool>
 
 bayes_opt:
   iteration: <int>
@@ -60,14 +65,13 @@ bayes_opt:
   score: <float>
   summary: <list>
   
-  strategies: [ S1, S2 ]
-  curr_strategy: 0
+  curr_strategy: <obj>
 
   control:
     params: dict
     suggests: dict
 
-  num_iter: 3
+  num_iter: 1
   seed: ((experiment.seed))
   tunable:
     dropout_rate:
