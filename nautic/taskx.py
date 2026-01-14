@@ -1,10 +1,7 @@
 from functools import wraps
 
-# ✅ Mutable global config
-class TaskxConfig:
-    disable_nautic = False
-
-taskx_cfg = TaskxConfig()
+from nautic.context import Context
+from nautic.config import taskx_cfg
 
 # Cache the task import (initially None)
 _cached_task = None
@@ -23,7 +20,7 @@ def taskx(_func=None, **t_kwargs):
     def decorator(fn):
         fn._is_taskx = True  # 👈 marker for taskx detection
         @wraps(fn)
-        def wrapper(ctx, *args, **kwargs):
+        def wrapper(ctx: Context, *args, **kwargs):
             fn(ctx, *args, **kwargs)
             return ctx
         if taskx_cfg.disable_nautic:

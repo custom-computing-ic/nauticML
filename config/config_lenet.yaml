@@ -1,0 +1,145 @@
+---
+
+experiment:
+  seed: 42
+  save_dir: ./prj/exp_mnist_bayes_lenet_try
+  save_model: mnist_bayes_lenet_10samples_mc
+  gpus: [0]
+  ckpt_file: best_chkp.tf
+
+dataset:
+  name: mnist
+  data: <dict>
+  mean: 0.0
+  std: 1.0
+
+model:
+  original: <obj>
+  logic: <obj>
+  name: lenet
+  is_quant: false
+  dropout_rate: 0.4
+  p_rate: 0.05
+  scale_factor: 0.3
+  dropout_type: mc
+  num_bayes_layer: 3
+
+# NOTE: introduce typing so that we can type dictionaries too
+S1:
+  accuracy: 
+    weight: 0.25
+    base: 0.99
+  ece: 
+    weight: -0.25
+    base: 0.03
+  ape: 
+    weight: 0.25
+    base: 1.5
+  flops: 
+    weight: -0.25
+    base: 5340192
+
+  top_n: 3
+  # special metric calculated from the other metrics
+  top_metric: score
+
+  name: Balance
+
+S2:
+  accuracy: 
+    weight: 0.75
+    base: 0.99
+  ece: 
+    weight: 0.00
+    base: 0.03
+  ape: 
+    weight: 0.00
+    base: 1.5
+  flops: 
+    weight: -0.25
+    base: 5340192
+
+  top_n: 1
+  top_metric: flops
+
+  name: Opt-Efficiency
+  
+strategy:
+  strategies: [ S1 ]
+  curr_strategy: <int>
+  curr_results: ((bayes_opt.summary))
+
+  terminate_strategies: <bool>
+  results: <dict>
+  save_dir: ((experiment.save_dir))
+
+
+bayes_opt:
+  iteration: <int>
+  terminate: <bool>
+  engine: <obj>
+  score: <float>
+  summary: <list>
+  
+  curr_strategy: <obj>
+
+  control:
+    params: dict
+    suggests: dict
+
+  num_iter: 2
+  seed: ((experiment.seed))
+  tunable:
+    dropout_rate:
+       value: ((model.dropout_rate))
+       space: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.80, 0.85, 0.90, 0.95]
+      #  space: [0.1, 0.2, 0.3, 0.4]
+    p_rate:
+       value: ((model.p_rate))
+       space:  [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.80, 0.85, 0.90, 0.95]
+      #  space: [0.0, 0.1, 0.2]
+    num_bayes_layer:
+       value: ((model.num_bayes_layer))
+       space: [1, 2, 3]
+    scale_factor:
+       value: ((model.scale_factor))
+      #  space: [0.5, 1.0, 1.5]
+       space: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.80, 0.85, 0.90, 0.95]
+
+  metrics:
+    accuracy: ((eval.accuracy))
+    ece: ((eval.ece))
+    ape: ((eval.ape))
+    flops: ((eval.flops))
+
+train:
+  optimizer: <obj>
+  id: ((bayes_opt.iteration))
+  num_epoch: 3
+  batch_size: 128
+  learning_rate: 0.01
+  validation_split: 0.1
+
+eval:
+  ece: <float>
+  ape: <float>
+  accuracy: <float>
+  flops: <float>
+
+  mc_samples: 5
+  num_eval_images: 200
+  num_bins: 10
+
+
+reporter:
+  log:
+    - bayes_opt.iteration
+    - dropout_rate_list
+    - p_rate
+    - num_bayes_layer
+    - scale_factor
+    - accuracy
+    - flops
+    - ece
+    - ape
+    - score

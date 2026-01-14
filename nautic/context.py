@@ -1,12 +1,12 @@
-import os
 import re
 import yaml
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, create_model
 from colorama import Fore, Style
-from .engine import Engine
-from .flowx import flowx_cfg
-from .taskx import taskx_cfg
+
+from nautic.engine import Engine
+from nautic.config import flowx_cfg
+from nautic.config import taskx_cfg
 
 # Simple wrapper for scalar alias values
 class AliasRef:
@@ -62,10 +62,7 @@ class AliasRef:
     def __repr__(self):
         return f"AliasRef(src={self.src} => target={self.target}"
 
-
-
-
-# Main Config wrapper
+# This class is responsible to parse the yaml file into a python object
 class Context:
     # Type mapping for explicit string declarations
     __TYPE_MAP = {
@@ -81,7 +78,7 @@ class Context:
 
     @staticmethod
     def create(cfg_yaml: str,
-               disable_nautic:bool=True,
+               disable_nautic: bool=True,
                log_level: str = None,
                **kwargs) -> BaseModel:
 
@@ -102,11 +99,15 @@ class Context:
         for kw in keywords:
             if kw in raw_yaml:
                 raise ValueError(f"Configuration YAML must not contain '{kw}' keyword.")
+
+            # inject placeolders for the keywords
             raw_yaml[kw] = '<obj>'
 
+
         model_builder = Context.__build_model("Context", raw_yaml)
+
         # aliases contains
-        (cfg, refs) =  Context.__get_values(raw_yaml)
+        (cfg, refs) = Context.__get_values(raw_yaml)
 
         model = model_builder(**cfg)
         # resolve alias references
@@ -138,6 +139,7 @@ class Context:
             elif isinstance(value, str) and value in Context.__TYPE_MAP:
                 return (Optional[Context.__TYPE_MAP[value]], None)
             else:
+                # TODO: throw error on incorrect type thrown
                 return (type(value), value)
 
         def build_fields(content, path=""):
@@ -150,10 +152,12 @@ class Context:
                     submodel_fields = build_fields(val, path=full_path)
                     sub_model = create_model(
                         f"{name}_{key}".title().replace("_", ""), **submodel_fields)
+                    
                     fields[key] = (sub_model, ...)
                 elif isinstance(val, list):
                     elem_type = type(val[0]) if val else Any
                     fields[key] = (List[elem_type], val)
+                    
                 else:
                     is_alias_reference = isinstance(val, str) and Context.ALIAS_PATTERN.match(val)
                     if is_alias_reference:
@@ -200,10 +204,6 @@ class Context:
                 return data, refs
         else:
             return data, refs
-
-
-
-
 
     def __getattr__(self, name):
         return getattr(self._data, name)
