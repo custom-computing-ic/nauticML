@@ -66,6 +66,7 @@ class Logger:
                 link_text=kwargs.get("text") or kwargs["link"],
                 key=kwargs.get("key"),
                 description=kwargs.get("description"),
+                client=None
             )
 
         elif "table" in kwargs:

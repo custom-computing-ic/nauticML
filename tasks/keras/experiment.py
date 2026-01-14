@@ -17,20 +17,21 @@ class KerasExperiment:
                 gpu_indices (list of int): List of GPU indices to make visible to TensorFlow.
                                         Use an empty list to disable GPU usage.
             """
+
+            log = ctx.log
+            log.debug("I AM A TEST EXPERIMENT - In DEBUG Mode")
+
             if use_cpu:
                 try:
                     # Make no GPUs visible (force CPU mode)
                     tf.config.set_visible_devices([], 'GPU')
-                    print("🚫 GPU usage disabled — running on CPU only.")
+                    log.info("🚫 GPU usage disabled — running on CPU only.")
                 except RuntimeError as e:
-                    print("❌ RuntimeError while disabling GPU:", e)
+                    log.info("❌ RuntimeError while disabling GPU:", e)
                 finally:
                     return
 
             gpus = tf.config.list_physical_devices('GPU')
-
-            log = ctx.log
-            log.debug("OH NO! I AM A TEST EXPERIMENT")
 
             if not gpus:
                 log.warning("⚠️ No GPUs found.")
@@ -38,7 +39,7 @@ class KerasExperiment:
             else:
                 log.debug(f"Found {len(gpus)} GPU(s): {[gpu.name for gpu in gpus]}")
 
-            if len(gpu_indices) > 0:
+            if gpu_indices and len(gpu_indices) > 0:
                 try:
                     selected_gpus = [gpus[i] for i in gpu_indices]
                     tf.config.set_visible_devices(selected_gpus, 'GPU')

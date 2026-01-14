@@ -1,5 +1,6 @@
 from bayes_opt import BayesianOptimization
 from nautic import taskx
+from tasks.strategy.strategy import Strategy
 
 class BayesOpt:
 
@@ -36,7 +37,7 @@ class BayesOpt:
             allow_duplicate_points=True
         )
 
-        bo.curr_strategy = ctx.strategy.strategies[ctx.strategy.curr_strategy]
+        bo.curr_strategy = Strategy.get_curr_strategy_object(ctx)
 
     @taskx
     def bayesian_opt(ctx):
@@ -82,20 +83,23 @@ class BayesOpt:
             'iteration': bo.iteration
         }
 
+        metric_values = {}
         for metric in bo.metrics.model_fields:
             metric_value = getattr(bo.metrics, metric).get()
             curr_metric_params = getattr(bo.curr_strategy, metric)
 
             score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
-            summary[metric] = round(metric_value, 4)
+            metric_values[metric] = round(metric_value, 4)
 
+        metric_values["score"] = score
+        summary["metrics"] = metric_values
+        
         bo.score = score
 
-        summary['score'] = score
-        summary.update(BayesOpt.suggest_to_values(bo))
+        summary["hyperparameters"] = BayesOpt.suggest_to_values(bo)
             
         bo.summary.append(summary)
-        log.artifact(key='bayes-iteration-summary',
+        log.artifact(key=f'bayes-iteration-summary-strategy-{bo.curr_strategy.name}'.lower(),
                     table=bo.summary)
 
         engine.register(params=bo.control.suggests,

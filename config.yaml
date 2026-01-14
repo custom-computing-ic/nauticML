@@ -39,6 +39,12 @@ S1:
     weight: -0.25
     base: 5340192
 
+  top_n: 3
+  # special metric calculated from the other metrics
+  top_metric: score
+
+  name: Balance
+
 S2:
   accuracy: 
     weight: 0.75
@@ -52,11 +58,21 @@ S2:
   flops: 
     weight: -0.25
     base: 5340192
+
+  top_n: 1
+  top_metric: flops
+
+  name: Opt-Efficiency
   
 strategy:
   strategies: [ S1, S2 ]
   curr_strategy: <int>
+  curr_results: ((bayes_opt.summary))
+
   terminate_strategies: <bool>
+  results: <dict>
+  save_dir: ((experiment.save_dir))
+
 
 bayes_opt:
   iteration: <int>
@@ -71,7 +87,7 @@ bayes_opt:
     params: dict
     suggests: dict
 
-  num_iter: 1
+  num_iter: 5
   seed: ((experiment.seed))
   tunable:
     dropout_rate:

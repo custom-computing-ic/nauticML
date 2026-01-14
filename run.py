@@ -1,5 +1,6 @@
 import os
 import warnings
+
 os.environ["PREFECT_LOGGING_LEVEL"] = "INFO"
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated as an API", category=UserWarning)
@@ -28,10 +29,7 @@ def perform_optimization(ctx):
 
     # TODO: set as default to True in config
     while not ctx.strategy.terminate_strategies:
-
-        log.info(f"""
-            We are using the strategy: {ctx.strategy.curr_strategy}   
-        """)
+        log.info(f"We are using the strategy: {ctx.strategy.curr_strategy}")
 
         engine.keras.initialize_experiment()
         engine.keras.get_dataset()
@@ -42,6 +40,7 @@ def perform_optimization(ctx):
             # think about triggers
             engine.dse.bayesian_opt()
             if ctx.bayes_opt.terminate:
+                engine.strategy.save_results()
                 engine.strategy.next_strategy()
                 break
                 
@@ -49,25 +48,29 @@ def perform_optimization(ctx):
             engine.keras.trust.build_bayesian_model()
             engine.keras.train_model()
             engine.keras.eval()
-
-        engine.dse.create_pareto_figures()
         
-        best_summary = max(ctx.bayes_opt.summary, key=lambda x: x["score"])
+        best_summary = max(ctx.bayes_opt.summary, key=lambda x: x["metrics"]["score"])
 
-        log.info(f"""
-            Final parameters:
-                    droupout rate: {best_summary["dropout_rate"]}
-                    p rate: {best_summary["p_rate"]}
-                    scale factor: {best_summary["scale_factor"]}
-                    num bayes later: {best_summary["num_bayes_layer"]}""")
+        params = best_summary["hyperparameters"]
+        log.info(
+        f"""Final parameters:
+                droupout rate: {params["dropout_rate"]}
+                p rate: {params["p_rate"]}
+                scale factor: {params["scale_factor"]}
+                num bayes later: {params["num_bayes_layer"]}""")
 
-        log.info(f"""
-            With performance metrics:
-                ece: {best_summary["ece"]}
-                ape: {best_summary["ape"]}
-                accuracy: {best_summary["accuracy"]}
-                flops: {best_summary["flops"]}""")
+        metrics = best_summary["metrics"]
+        log.info(
+        f"""With performance metrics:
+                ece: {metrics["ece"]}
+                ape: {metrics["ape"]}
+                accuracy: {metrics["accuracy"]}
+                flops: {metrics["flops"]}""")
     
+    engine.strategy.create_result_table()
+    engine.strategy.create_pareto_figures()
+    engine.strategy.create_correlation_matrix()
+
     log.info("Finished with all the strategies for Bayesian Optimisation")
 
 if __name__ == "__main__":
