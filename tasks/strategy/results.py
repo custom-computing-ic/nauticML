@@ -195,8 +195,8 @@ class Results:
         for strat_index, strat_results in results.items():
             strat_obj = strat.strategies[strat_index]
 
-            # just log the top n results according to the top metric in the table for particular strategy
-            for i, top_result in enumerate(nlargest(strat_obj.top_n, strat_results, key=lambda r: r["metrics"][strat_obj.top_metric])):
+            # just log the top n results according to the score in the table for particular strategy
+            for i, top_result in enumerate(nlargest(strat_obj.top_n, strat_results, key=lambda r: r["metrics"]["score"])):
                 row_name = strat_obj.name
 
                 # add top name only if we keep track of multiple top results

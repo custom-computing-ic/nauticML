@@ -2,7 +2,11 @@ from bayes_opt import BayesianOptimization
 from nautic import taskx
 from tasks.strategy.strategy import Strategy
 
+
+
 class BayesOpt:
+
+    INVALID_SCORE = -1e6
 
     @taskx
     def initialise_bayesian_opt(ctx):
@@ -86,10 +90,20 @@ class BayesOpt:
         metric_values = {}
         for metric in bo.metrics.model_fields:
             metric_value = getattr(bo.metrics, metric).get()
+            metric_values[metric] = round(metric_value, 4)
+
             curr_metric_params = getattr(bo.curr_strategy, metric)
+ 
+            # If we don't satisfy the minimum or maximum constraints, we have the worst possible score
+            if "min" in curr_metric_params.model_fields.keys():
+                if metric_value < curr_metric_params.min:
+                    score = BayesOpt.INVALID_SCORE
+            
+            if "max" in curr_metric_params.model_fields.keys():
+                if metric_value > curr_metric_params.max:
+                    score = BayesOpt.INVALID_SCORE
 
             score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
-            metric_values[metric] = round(metric_value, 4)
 
         metric_values["score"] = score
         summary["metrics"] = metric_values
