@@ -25,14 +25,13 @@ def perform_optimization(ctx):
     engine = ctx.engine
     log = ctx.log
 
+    engine.keras.initialize_experiment()
     engine.strategy.initialise_strategies()
 
     while not ctx.strategy.terminate_strategies:
         log.info(f"We are using the strategy: {ctx.strategy.curr_strategy}")
 
-        engine.keras.initialize_experiment()
         engine.keras.get_dataset()
-
         engine.dse.initialise_bayesian_opt()
 
         while True:

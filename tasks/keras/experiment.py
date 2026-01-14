@@ -4,7 +4,7 @@ from typing import List
 
 os.environ['TF_DETERMINISTIC_OPS'] = '1'  # Force TF deterministic ops
 os.environ['TF_CUDNN_DETERMINISTIC'] = '1'  # CuDNN determinism for certain layers
-os.environ['TF_ENABLE_AUTO_MIXED_PRECISION'] = '0'  # Optional: disables AMP which can introduce nondeterminism
+# os.environ['TF_ENABLE_AUTO_MIXED_PRECISION'] = '0'  # Disables AMP which can introduce nondeterminism
 
 import tensorflow as tf
 
@@ -72,7 +72,6 @@ class KerasExperiment:
 
         seed = ctx.experiment.seed
 
-        # TODO: add randomisation for tf env vars
         os.environ['PYTHONHASHSEED'] = str(seed)
 
         random.seed(seed)
