@@ -14,7 +14,7 @@ os.environ["PREFECT_API_URL"] = "http://localhost:4200/api"
 
 # absolute path for config
 BASE_DIR = Path(__file__).resolve().parent
-ctx = Context.create(str(BASE_DIR / "config.yaml"),
+ctx = Context.create(str(BASE_DIR / "config_resnet.yaml"),
                      log_level="INFO",
                      disable_nautic=False)
 
@@ -27,7 +27,6 @@ def perform_optimization(ctx):
 
     engine.strategy.initialise_strategies()
 
-    # TODO: set as default to True in config
     while not ctx.strategy.terminate_strategies:
         log.info(f"We are using the strategy: {ctx.strategy.curr_strategy}")
 

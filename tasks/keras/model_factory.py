@@ -8,6 +8,7 @@ from tensorflow.keras.models import clone_model
 
 from tasks.keras.models.lenet import LeNet
 from nautic import taskx
+from tasks.keras.models.resnet import ResNet18
 
 class KerasModels:
     @taskx
@@ -25,7 +26,8 @@ class KerasModels:
         factory_quant = {   }
 
         factory_nquant = {
-            "lenet": LeNet
+            "lenet": LeNet,
+            "resnet": ResNet18
         }
 
         if ctx.model.is_quant:
@@ -34,12 +36,10 @@ class KerasModels:
             model_builder = factory_nquant.get(ctx.model.name, None)
 
         if not model_builder:
-            raise NotImplementedError(f"Model '{ctx.model.name}' (quant: {ctx.mode.is_quant}) not supported")
-
+            raise NotImplementedError(f"Model '{ctx.model.name}' (quant: {ctx.model.is_quant}) not supported")
 
         ctx.model.logic = model_builder(ctx)
         ctx.model.original = clone_model(ctx.model.logic)
-
 
         KerasModels.prune(ctx)
 
