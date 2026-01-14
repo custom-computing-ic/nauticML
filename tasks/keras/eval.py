@@ -23,9 +23,12 @@ class KerasEval:
 
     def evaluate_ece(ctx, y_prob) -> float:
         y_logits    = np.log(y_prob/(1-y_prob + 1e-15))
-        ece_keras   = tfp.stats.expected_calibration_error(num_bins=ctx.eval.num_bins,
-            logits=y_logits, labels_true=np.argmax(ctx.dataset.data["y_test"],axis=1), labels_predicted=np.argmax(y_prob,axis=1))
-        
+
+        # we use CPU device as TF_DETERMINISTIC_OPS is not implemented in tf.math.bincount(x)
+        with tf.device('/CPU:0'):
+            ece_keras   = tfp.stats.expected_calibration_error(num_bins=ctx.eval.num_bins,
+                logits=y_logits, labels_true=np.argmax(ctx.dataset.data["y_test"],axis=1), labels_predicted=np.argmax(y_prob,axis=1))
+            
         return float(ece_keras)
 
     def evaluate_ape(ctx, model) -> float:

@@ -4,7 +4,7 @@ experiment:
   seed: 42
   save_dir: ./prj/exp_mnist_bayes_lenet_try
   save_model: mnist_bayes_lenet_10samples_mc
-  cpu: True
+  gpus: [0]
   ckpt_file: best_chkp.tf
 
 dataset:

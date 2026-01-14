@@ -18,7 +18,7 @@ class Results:
 
         table = Results.get_top_n_results(strat)
 
-        log.artifact(key='strategy-top-results-table', table=table)
+        log.artifact(key='all-top-results-table', table=table)
 
         # save table as markdown in figures subfolder of save dir
         df = pd.DataFrame(table)
