@@ -62,7 +62,7 @@ class KerasTrain:
 
             log.artifact(table=train_stat.history,
                          key=f"train-results-{ctx.train.id.get()}",
-                         description="Training results",)
+                         description="Training results")
 
 
 

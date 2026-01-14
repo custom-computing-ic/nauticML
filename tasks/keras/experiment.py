@@ -1,4 +1,5 @@
 import os
+import shutil
 from typing import List
 import tensorflow as tf
 import random
@@ -54,9 +55,14 @@ class KerasExperiment:
                 log.warning("⚠️ CPU used by default as no CPU or GPU indices provided are empty")
                 return configure_gpus(True, [])
 
-        os.makedirs(ctx.experiment.save_dir, exist_ok=True)
-        ctx.experiment.save_dir = os.path.abspath(ctx.experiment.save_dir)
-        ctx.experiment.ckpt_file = os.path.join(ctx.experiment.save_dir, ctx.experiment.ckpt_file)
+        save_dir = ctx.experiment.save_dir
+
+        if os.path.exists(save_dir):
+            shutil.rmtree(save_dir)
+
+        os.makedirs(save_dir)
+        ctx.experiment.save_dir = os.path.abspath(save_dir)
+        ctx.experiment.ckpt_file = os.path.join(save_dir, ctx.experiment.ckpt_file)
 
         seed = ctx.experiment.seed
 

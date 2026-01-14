@@ -65,7 +65,7 @@ S2:
   name: Opt-Efficiency
   
 strategy:
-  strategies: [ S1, S2 ]
+  strategies: [ S1 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -87,7 +87,7 @@ bayes_opt:
     params: dict
     suggests: dict
 
-  num_iter: 5
+  num_iter: 2
   seed: ((experiment.seed))
   tunable:
     dropout_rate:

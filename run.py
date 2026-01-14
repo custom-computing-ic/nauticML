@@ -68,7 +68,7 @@ def perform_optimization(ctx):
                 flops: {metrics["flops"]}""")
     
     engine.strategy.create_result_table()
-    engine.strategy.create_pareto_figures()
+    engine.strategy.create_4d_pareto_figures()
     engine.strategy.create_correlation_matrix()
 
     log.info("Finished with all the strategies for Bayesian Optimisation")
