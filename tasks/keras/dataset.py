@@ -2,6 +2,7 @@
 import numpy as np
 from tensorflow.keras.datasets import mnist
 from tensorflow.keras.utils import to_categorical
+from logic.datasets import CIFAR10Data
 from nautic import taskx
 
 class KerasDataset:
@@ -34,7 +35,7 @@ class KerasDataset:
             x_test /= 256.0
             y_train = to_categorical(y_train, num_classes)
             y_test = to_categorical(y_test, num_classes)
-        elif ctx.dataset == "cifar10":
+        elif name == "cifar10":
             cifar10_data = CIFAR10Data()
             x_train, y_train, x_test, y_test = cifar10_data.get_data(subtract_mean=True)
 
@@ -48,7 +49,6 @@ class KerasDataset:
             x_train = x_train[mask]
             y_train = y_train[mask]
 
-            print('num train:%d num val:%d' % (num_train, num_val))
             data = (x_train, y_train, x_val, y_val, x_test, y_test)
         else:
             raise NotImplementedError("Dataset not supoorted")

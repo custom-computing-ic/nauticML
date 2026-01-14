@@ -2,13 +2,13 @@
 
 experiment:
   seed: 42
-  save_dir: ./prj/exp_mnist_bayes_lenet_try
-  save_model: mnist_bayes_lenet_10samples_mc
-  cpu: True
+  save_dir: ./prj/exp_cifar_bayes_resnet
+  save_model: cifar_resnet_tmp_3bayeslayer_mc
+  gpus: [0, 1]
   ckpt_file: best_chkp.tf
 
 dataset:
-  name: mnist
+  name: cifar10
   data: <dict>
   mean: 0.0
   std: 1.0
@@ -16,7 +16,7 @@ dataset:
 model:
   original: <obj>
   logic: <obj>
-  name: lenet
+  name: resnet
   is_quant: false
   dropout_rate: 0.4
   p_rate: 0.05
@@ -126,7 +126,7 @@ eval:
   accuracy: <float>
   flops: <float>
 
-  mc_samples: 5
+  mc_samples: 10
   num_eval_images: 200
   num_bins: 10
 
