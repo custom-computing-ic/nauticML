@@ -1,14 +1,13 @@
 ---
-
 experiment:
   seed: 42
-  save_dir: ./results
-  save_model: model
-  cpu: True
+  save_dir: ./prj/exp_cifar_bayes_resnet
+  save_model: cifar_resnet_tmp_3bayeslayer_mc
+  gpus: [0, 1]
   ckpt_file: best_chkp.tf
 
 dataset:
-  name: mnist
+  name: cifar10
   data: <dict>
   mean: 0.0
   std: 1.0
@@ -16,7 +15,7 @@ dataset:
 model:
   original: <obj>
   logic: <obj>
-  name: lenet
+  name: resnet
   is_quant: false
   dropout_rate: 0.4
   p_rate: 0.05
@@ -24,39 +23,6 @@ model:
   dropout_type: mc
   num_bayes_layer: 3
 
-# NOTE: introduce typing so that we can type dictionaries too
-S1:
-  accuracy: 
-    weight: 0.25
-    base: 0.99
-  ece: 
-    weight: -0.25
-    base: 0.03
-  ape: 
-    weight: 0.25
-    base: 1.5
-  flops: 
-    weight: -0.25
-    base: 5340192
-
-S2:
-  accuracy: 
-    weight: 0.75
-    base: 0.99
-  ece: 
-    weight: 0.00
-    base: 0.03
-  ape: 
-    weight: 0.00
-    base: 1.5
-  flops: 
-    weight: -0.25
-    base: 5340192
-  
-strategy:
-  strategies: [ S1, S2 ]
-  curr_strategy: <int>
-  terminate_strategies: <bool>
 
 bayes_opt:
   iteration: <int>
@@ -64,14 +30,12 @@ bayes_opt:
   engine: <obj>
   score: <float>
   summary: <list>
-  
-  curr_strategy: <obj>
-
   control:
     params: dict
+    metrics: dict
     suggests: dict
 
-  num_iter: 1
+  num_iter: 50
   seed: ((experiment.seed))
   tunable:
     dropout_rate:
@@ -93,8 +57,23 @@ bayes_opt:
   metrics:
     accuracy: ((eval.accuracy))
     ece: ((eval.ece))
-    ape: ((eval.ape))
-    flops: ((eval.flops))
+    aPE: ((eval.ape))
+    FLOP: ((eval.flops))
+
+  score_weights:
+    accuracy:
+      weight: 0.25
+      base: 0.99
+    ece:
+      weight: -0.25
+      base: 0.03
+    aPE:
+      weight: 0.25
+      base: 1.5
+    FLOP:
+      weight: -0.25
+      base: 5340192
+
 
 train:
   optimizer: <obj>
@@ -110,7 +89,7 @@ eval:
   accuracy: <float>
   flops: <float>
 
-  mc_samples: 5
+  mc_samples: 10
   num_eval_images: 200
   num_bins: 10
 

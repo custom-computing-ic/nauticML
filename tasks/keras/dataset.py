@@ -48,7 +48,6 @@ class KerasDataset:
             x_train = x_train[mask]
             y_train = y_train[mask]
 
-            print('num train:%d num val:%d' % (num_train, num_val))
             data = (x_train, y_train, x_val, y_val, x_test, y_test)
         else:
             raise NotImplementedError("Dataset not supoorted")
