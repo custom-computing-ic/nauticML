@@ -14,7 +14,7 @@ os.environ["PREFECT_API_URL"] = "http://localhost:4200/api"
 
 # absolute path for config
 BASE_DIR = Path(__file__).resolve().parent
-ctx = Context.create(str(BASE_DIR / "config_resnet.yaml"),
+ctx = Context.create(str(BASE_DIR / "config/config_lenet.yaml"),
                      log_level="INFO",
                      disable_nautic=False)
 
