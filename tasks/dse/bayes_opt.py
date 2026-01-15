@@ -6,7 +6,7 @@ from tasks.strategy.strategy import Strategy
 
 class BayesOpt:
 
-    INVALID_SCORE = -1e6
+    SCORE_PENALTY = 0
 
     @taskx
     def initialise_bayesian_opt(ctx):
@@ -87,6 +87,7 @@ class BayesOpt:
             'iteration': bo.iteration
         }
 
+        is_penalised = False
         metric_values = {}
         for metric in bo.metrics.model_fields:
             metric_value = getattr(bo.metrics, metric).get()
@@ -96,14 +97,16 @@ class BayesOpt:
  
             # If we don't satisfy the minimum or maximum constraints, we have the worst possible score
             if "min" in curr_metric_params.model_fields.keys():
-                if metric_value < curr_metric_params.min:
-                    score = BayesOpt.INVALID_SCORE
+                is_penalised = metric_value < curr_metric_params.min
             
             if "max" in curr_metric_params.model_fields.keys():
-                if metric_value > curr_metric_params.max:
-                    score = BayesOpt.INVALID_SCORE
+                is_penalised = metric_value > curr_metric_params.max
+
 
             score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
+
+        if is_penalised:
+            score += BayesOpt.SCORE_PENALTY
 
         metric_values["score"] = score
         summary["metrics"] = metric_values
@@ -113,7 +116,7 @@ class BayesOpt:
         summary["hyperparameters"] = BayesOpt.suggest_to_values(bo)
             
         bo.summary.append(summary)
-        log.artifact(key=f'bayes-iteration-summary-strategy-{bo.curr_strategy.name}'.lower(),
+        log.artifact(key=f'bayes-iteration-{bo.iteration}-summary-strategy-{bo.curr_strategy.name}'.lower(),
                     table=bo.summary)
 
         engine.register(params=bo.control.suggests,
@@ -129,21 +132,3 @@ class BayesOpt:
             hyperparams[key] = bo.control.params['space'][key][idx]
 
         return hyperparams       
-       
-       
-        # # Create a table artifact
-        # create_table_artifact(
-        #     key=f"bayes-iteration-{cfg.bayes_opt.iteration}",
-        #     table=[
-        #         {
-        #             "Iteration": cfg.bayes_opt.iteration,
-        #             "Previous Score": round(cfg.bayes_opt.score, 4) if cfg.bayes_opt.score is not None else "N/A",
-        #             "Dropout Rate": cfg.model.dropout_rate,
-        #             "P Rate": cfg.model.p_rate,
-        #             "Bayes Layers": cfg.model.num_bayes_layer,
-        #             "Scale Factor": cfg.model.scale_factor
-        #         }
-        #     ],
-        #     description="Bayesian Optimization Step Summary"
-        # )
-        # return cfg

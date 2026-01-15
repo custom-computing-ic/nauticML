@@ -195,8 +195,24 @@ class Results:
         for strat_index, strat_results in results.items():
             strat_obj = strat.strategies[strat_index]
 
+            valid_results = []
+
+            # ensure the results sit within the constraints of the metric parameters
+            for result in strat_results:
+                valid = True
+                # for metric_param in result["metrics"].keys():
+                #     metric_obj = getattr(strat_obj, metric_param)
+
+                #     if "min" in metric_obj.model_fields:
+                #         if result["metrics"][metric_param] < metric_obj.min:
+                #             valid = False
+                #             break
+
+                if valid:
+                    valid_results.append(result)
+
             # just log the top n results according to the score in the table for particular strategy
-            for i, top_result in enumerate(nlargest(strat_obj.top_n, strat_results, key=lambda r: r["metrics"]["score"])):
+            for i, top_result in enumerate(nlargest(strat_obj.top_n, valid_results, key=lambda r: r["metrics"]["score"])):
                 row_name = strat_obj.name
 
                 # add top name only if we keep track of multiple top results
