@@ -6,7 +6,7 @@ from tasks.strategy.strategy import Strategy
 
 class BayesOpt:
 
-    SCORE_PENALTY = 0
+    SCORE_PENALTY = -1e6
 
     @taskx
     def initialise_bayesian_opt(ctx):
@@ -79,6 +79,28 @@ class BayesOpt:
         for key, value in metric_values.items():
             bo.control.params['values'][key].set(value)
 
+    @taskx
+    def show_best_parameters(ctx):
+        bo = ctx.bayes_opt
+        log = ctx.log
+        best_summary = max(bo.summary, key=lambda x: x["metrics"]["score"])
+
+        params = best_summary["hyperparameters"]
+        log.info(
+        f"""Final parameters:
+                droupout rate: {params["dropout_rate"]}
+                p rate: {params["p_rate"]}
+                scale factor: {params["scale_factor"]}
+                num bayes later: {params["num_bayes_layer"]}""")
+
+        metrics = best_summary["metrics"]
+        log.info(
+        f"""With performance metrics:
+                ece: {metrics["ece"]}
+                ape: {metrics["ape"]}
+                accuracy: {metrics["accuracy"]}
+                flops: {metrics["flops"]}""")
+
     # Records current iteration suggest into a summary
     @staticmethod
     def record_iteration(bo, engine, log):
@@ -106,7 +128,7 @@ class BayesOpt:
             score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
 
         if is_penalised:
-            score += BayesOpt.SCORE_PENALTY
+            score = BayesOpt.SCORE_PENALTY
 
         metric_values["score"] = score
         summary["metrics"] = metric_values

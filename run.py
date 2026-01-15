@@ -47,28 +47,9 @@ def perform_optimization(ctx):
             engine.keras.train_model()
             engine.keras.eval()
         
-        best_summary = max(ctx.bayes_opt.summary, key=lambda x: x["metrics"]["score"])
-
-        params = best_summary["hyperparameters"]
-        log.info(
-        f"""Final parameters:
-                droupout rate: {params["dropout_rate"]}
-                p rate: {params["p_rate"]}
-                scale factor: {params["scale_factor"]}
-                num bayes later: {params["num_bayes_layer"]}""")
-
-        metrics = best_summary["metrics"]
-        log.info(
-        f"""With performance metrics:
-                ece: {metrics["ece"]}
-                ape: {metrics["ape"]}
-                accuracy: {metrics["accuracy"]}
-                flops: {metrics["flops"]}""")
+        engine.dse.show_best_parameters()
     
-    engine.strategy.create_result_table()
-    engine.strategy.create_4d_pareto_figures()
-    engine.strategy.create_correlation_matrix()
-
+    engine.strategy.create_result_figures()
     log.info("Finished with all the strategies for Bayesian Optimisation")
 
 if __name__ == "__main__":

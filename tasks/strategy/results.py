@@ -12,13 +12,20 @@ import os
 
 class Results:
     @taskx
-    def create_result_table(ctx):
+    def create_result_figures(ctx):
+        Results.create_top_result_table(ctx)
+        Results.create_all_result_table(ctx)
+        Results.create_4d_pareto_figures(ctx)
+        Results.create_correlation_matrix(ctx)
+
+    @staticmethod
+    def create_top_result_table(ctx):
         strat = ctx.strategy
         log = ctx.log
 
         table = Results.get_top_n_results(strat)
 
-        log.artifact(key='all-top-results-table', table=table)
+        log.artifact(key='top-results-table', table=table)
 
         # save table as markdown in figures subfolder of save dir
         df = pd.DataFrame(table)
@@ -29,12 +36,49 @@ class Results:
 
         log.info("\nTop strategy results:\n%s", md_df)
 
-        md_path = Results.get_figures_path("all_top_results_table.md", strat.save_dir.get())
+        md_path = Results.get_figures_path("top_results_table.md", strat.save_dir.get())
         with open(md_path, "w") as f:
             f.write("# Top Strategy Results\n\n")
             f.write(md_df)
+    
+    @staticmethod
+    def create_all_result_table(ctx):
+        strat = ctx.strategy
+        log = ctx.log
 
-    @taskx
+        results = strat.results
+        table = []
+
+        for strat_index, strat_results in results.items():
+            strat_obj = strat.strategies[strat_index]
+
+            for top_result in strat_results:
+                row_name = strat_obj.name
+
+                row = {"Opt-Mode": row_name}
+
+                row.update(top_result.get("hyperparameters", {}))
+                row.update(top_result.get("metrics", {}))
+
+                table.append(row)
+        
+        log.artifact(key='all-results-table', table=table)
+
+        # save table as markdown in figures subfolder of save dir
+        df = pd.DataFrame(table)
+
+        columns = ["Opt-Mode"] + [c for c in df.columns if c != "Opt-Mode"]
+        df = df[columns]
+        md_df = df.to_markdown(index=False)
+
+        log.info("\n All results:\n%s", md_df)
+
+        md_path = Results.get_figures_path("all_results_table.md", strat.save_dir.get())
+        with open(md_path, "w") as f:
+            f.write("# All Results\n\n")
+            f.write(md_df)
+
+    @staticmethod
     def create_4d_pareto_figures(ctx):
         strat = ctx.strategy
         log = ctx.log
@@ -136,11 +180,12 @@ class Results:
         # TODO: actually fix the artifact to upload a real image
         log.artifact(key='4d-pareto-front-plot', image=plt_path)
 
-    @taskx
+    @staticmethod
     def create_correlation_matrix(ctx):
         strat = ctx.strategy
         log = ctx.log
 
+        # TODO: abstract topn and this to one function
         points = []
         for _, results_list in strat.results.items():
             for result in results_list:
@@ -195,24 +240,8 @@ class Results:
         for strat_index, strat_results in results.items():
             strat_obj = strat.strategies[strat_index]
 
-            valid_results = []
-
-            # ensure the results sit within the constraints of the metric parameters
-            for result in strat_results:
-                valid = True
-                # for metric_param in result["metrics"].keys():
-                #     metric_obj = getattr(strat_obj, metric_param)
-
-                #     if "min" in metric_obj.model_fields:
-                #         if result["metrics"][metric_param] < metric_obj.min:
-                #             valid = False
-                #             break
-
-                if valid:
-                    valid_results.append(result)
-
             # just log the top n results according to the score in the table for particular strategy
-            for i, top_result in enumerate(nlargest(strat_obj.top_n, valid_results, key=lambda r: r["metrics"]["score"])):
+            for i, top_result in enumerate(nlargest(strat_obj.top_n, strat_results, key=lambda r: r["metrics"]["score"])):
                 row_name = strat_obj.name
 
                 # add top name only if we keep track of multiple top results
@@ -242,218 +271,3 @@ class Results:
                 is_efficient[is_efficient] = np.any(data[is_efficient] < c, axis=1)
                 is_efficient[i] = True
         return is_efficient
-
-    
-
-# if __name__ == "__main__":
-#     # Your data (as a Python list of dicts)
-#     data = [
-#         {
-#             "iteration": 1,
-#             "metrics": {
-#                 "accuracy": 0.2371,
-#                 "ece": 0.0963,
-#                 "ape": 1.7475,
-#                 "flops": 1917120,
-#                 "score": -0.54116058430776
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.4,
-#                 "p_rate": 0.95,
-#                 "num_bayes_layer": 3,
-#                 "scale_factor": 0.6
-#             }
-#         },
-#         {
-#             "iteration": 2,
-#             "metrics": {
-#                 "accuracy": 0.1786,
-#                 "ece": 0.0174,
-#                 "ape": 1.9989,
-#                 "flops": 3931170,
-#                 "score": 0.049543874625775336
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.95,
-#                 "p_rate": 0.7,
-#                 "num_bayes_layer": 1,
-#                 "scale_factor": 0.9
-#             }
-#         },
-#         {
-#             "iteration": 3,
-#             "metrics": {
-#                 "accuracy": 0.5984,
-#                 "ece": 0.0336,
-#                 "ape": 1.6632,
-#                 "flops": 2506662,
-#                 "score": 0.031364363946693244
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.2,
-#                 "p_rate": 0.1,
-#                 "num_bayes_layer": 2,
-#                 "scale_factor": 0.7
-#             }
-#         },
-#         {
-#             "iteration": 4,
-#             "metrics": {
-#                 "accuracy": 0.2098,
-#                 "ece": 0.0558,
-#                 "ape": 2.0483,
-#                 "flops": 452435,
-#                 "score": -0.09194228433872143
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.45,
-#                 "p_rate": 0.3,
-#                 "num_bayes_layer": 1,
-#                 "scale_factor": 0.25
-#             }
-#         },
-#         {
-#             "iteration": 5,
-#             "metrics": {
-#                 "accuracy": 0.1756,
-#                 "ece": 0.0206,
-#                 "ape": 1.8578,
-#                 "flops": 4336525,
-#                 "score": -0.020782943634756024
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.95,
-#                 "p_rate": 0.7,
-#                 "num_bayes_layer": 1,
-#                 "scale_factor": 0.95
-#             }
-#         }
-#     ]
-
-#     data2 = [
-#         {
-#             "iteration": 1,
-#             "metrics": {
-#                 "accuracy": 0.2371,
-#                 "ece": 0.0963,
-#                 "ape": 1.7475,
-#                 "flops": 1917120,
-#                 "score": 0.08987163008371235
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.4,
-#                 "p_rate": 0.95,
-#                 "num_bayes_layer": 3,
-#                 "scale_factor": 0.6
-#             }
-#         },
-#         {
-#             "iteration": 2,
-#             "metrics": {
-#                 "accuracy": 0.1786,
-#                 "ece": 0.0174,
-#                 "ape": 1.9989,
-#                 "flops": 3931170,
-#                 "score": -0.04873389196493308
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.95,
-#                 "p_rate": 0.7,
-#                 "num_bayes_layer": 1,
-#                 "scale_factor": 0.9
-#             }
-#         },
-#         {
-#             "iteration": 3,
-#             "metrics": {
-#                 "accuracy": 0.5984,
-#                 "ece": 0.0336,
-#                 "ape": 1.6632,
-#                 "flops": 2506662,
-#                 "score": 0.3359844627309281
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.2,
-#                 "p_rate": 0.1,
-#                 "num_bayes_layer": 2,
-#                 "scale_factor": 0.7
-#             }
-#         },
-#         {
-#             "iteration": 4,
-#             "metrics": {
-#                 "accuracy": 0.7402,
-#                 "ece": 0.0244,
-#                 "ape": 1.7673,
-#                 "flops": 1644813,
-#                 "score": 0.4837559904213181
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.05,
-#                 "p_rate": 0.05,
-#                 "num_bayes_layer": 2,
-#                 "scale_factor": 0.55
-#             }
-#         },
-#         {
-#             "iteration": 5,
-#             "metrics": {
-#                 "accuracy": 0.1976,
-#                 "ece": 0.0713,
-#                 "ape": 2.2282,
-#                 "flops": 51575,
-#                 "score": 0.1472824965843925
-#             },
-#             "hyperparameters": {
-#                 "dropout_rate": 0.05,
-#                 "p_rate": 0.05,
-#                 "num_bayes_layer": 3,
-#                 "scale_factor": 0.05
-#             }
-#         }
-#     ]
-
-#     data_dict = {0: data}
-#     data_dict[1] = data2
-
-#     table = []
-
-#     strategies = [
-#         {
-#                 "top_n": 3,
-#                 "top_metric": "score",
-#                 "name": "Opt-Balance"
-#         }, {
-#                 "top_n": 1,
-#                 "top_metric": "flops",
-#                 "name": "Opt-Efficiency"
-#             }
-#     ]
-
-#     for strat_index, strat_results in data_dict.items():
-#         strat_obj = strategies[strat_index]
-
-#         # just log the top n results according to the top metric in the table for particular strategy
-#         for i, top_result in enumerate(nlargest(strat_obj["top_n"], strat_results, key=lambda r: r["metrics"][strat_obj["top_metric"]])):
-#             row_name = strat_obj["name"]
-
-#             # add top name only if we keep track of multiple top results
-#             if strat_obj["top_n"] > 1:
-#                 row_name = f"{row_name}-Top{i+1}"
-
-#             row = {"Opt-Mode": row_name}
-
-#             row.update(top_result.get("hyperparameters", {}))
-#             row.update(top_result.get("metrics", {}))
-
-#             table.append(row)
-
-
-
-#     plot_pareto_3d(data_dict, table)
-
-
-
-
-
-    

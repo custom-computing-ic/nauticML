@@ -1,7 +1,7 @@
 ---
 
 experiment:
-  seed: 67
+  seed: 42
   save_dir: ./prj/exp_mnist_bayes_lenet_try
   save_model: mnist_bayes_lenet_10samples_mc
   gpus: [0]
@@ -156,7 +156,7 @@ bayes_opt:
     params: dict
     suggests: dict
 
-  num_iter: 200
+  num_iter: 100
   seed: ((experiment.seed))
   tunable:
     dropout_rate:
