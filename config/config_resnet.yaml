@@ -48,16 +48,16 @@ S1:
 S2:
   accuracy: 
     weight: 0.75
-    base: 0.99
+    base: 0.92
   ece: 
     weight: 0.00
-    base: 0.03
+    base: 0.09
   ape: 
     weight: 0.00
-    base: 1.5
+    base: 1.8
   flops: 
     weight: -0.25
-    base: 5340192
+    base: 1112422588
 
   top_n: 1
   top_metric: flops

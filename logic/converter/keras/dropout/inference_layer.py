@@ -12,7 +12,7 @@ class InferenceDropoutLayer(tf.keras.layers.Layer):
         self.drop_rate = drop_rate
         # if seed set to None, random output will be given
         self.seed = seed
-        self.dropout_layer = tf.keras.layers.Dropout(rate=self.drop_rate, seed=self.seed)
+        # self.dropout_layer = tf.keras.layers.Dropout(rate=self.drop_rate, seed=self.seed)
 
 
     def get_config(self):
@@ -29,5 +29,5 @@ class InferenceDropoutLayer(tf.keras.layers.Layer):
     def from_config(cls, config):
         return cls(**config)
 
-    def call(self, inputs):
-        return self.dropout_layer(inputs, training=True)
+    def call(self, input):
+        return tf.keras.layers.Dropout(rate=self.drop_rate, seed=self.seed)(input, training=True)

@@ -7,13 +7,23 @@ from tensorflow.python.framework.convert_to_constants import (
     convert_variables_to_constants_v2_as_graph,
 )
 from sklearn.metrics import accuracy_score
+from logic.converter.keras.dropout.inference_layer import InferenceDropoutLayer
+from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
+
 from nautic import taskx
+from tasks.keras.trust.converter.dropout.mc_model import MonteCarloDropoutModel
 
 class KerasEval:
 
     @taskx
     def eval(ctx):
-        model = load_model(ctx.experiment.ckpt_file)
+
+        co = {  "InferenceDropoutLayer": InferenceDropoutLayer,
+            "MonteCarloDropoutModel": MonteCarloDropoutModel,
+            "PruneLowMagnitude": pruning_wrapper.PruneLowMagnitude
+        }
+
+        model = load_model(ctx.experiment.ckpt_file, custom_objects=co)
         y_prob = model.predict(ctx.dataset.data["x_test"])
 
         ctx.eval.accuracy = KerasEval.evaluate_accuracy(ctx, y_prob)

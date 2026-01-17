@@ -76,4 +76,3 @@ class KerasModels:
                     loss=['categorical_crossentropy'], metrics=['accuracy'])
 
         ctx.model.logic = model
-

@@ -22,4 +22,4 @@ class KerasMCUncertaintyModel:
                   optimizer=Adam(learning_rate=ctx.train.learning_rate),
                   metrics=["accuracy"])
 
-      return ctx
+      ctx.model.logic = model
