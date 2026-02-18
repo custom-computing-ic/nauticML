@@ -30,6 +30,177 @@ class KerasEval:
         ctx.eval.ece = KerasEval.evaluate_ece(ctx, y_prob)
         ctx.eval.ape = KerasEval.evaluate_ape(ctx, model)
         ctx.eval.flops = KerasEval.evaluate_flops(ctx)
+        ctx.eval.power = KerasEval.evaluate_power(ctx, model)
+
+    def evaluate_power(ctx, model) -> float:
+        """
+        Estimate MCD power consumption by:
+        1. Stripping non-synthesisable layers (dropout, pruning wrappers)
+        to get a deterministic backbone suitable for hls4ml
+        2. Converting to an hls4ml project in a temp directory
+        3. (Future) Running Vivado synthesis + P&R to get single-pass power
+        4. Multiplying by S (number of MC samples) to estimate full MCD power
+
+        Note: Stripping dropout means we synthesize a single deterministic
+        forward pass. The actual BayesCNN runs S stochastic passes reusing
+        the same hardware, so total MCD power ≈ S × single_pass_power.
+        See HEART 2025 (Que et al.), Table 5 — Vivado post-P&R power is
+        reported for the deterministic backbone; MCD reuses it S times.
+        """
+        import hls4ml
+        import tempfile
+        import os
+
+        # Number of MC forward passes (default from eval.mc_samples)
+        num_mc_samples = ctx.hls4ml.num_mc_samples
+
+        # --- Step 1: Strip non-synthesisable layers ---
+        # Dropout and pruning wrappers have no HLS template in hls4ml.
+        # Stripping preserves the trained (pruned) weights — zeros remain
+        # zero, which hls4ml can exploit with the Resource strategy.
+        stripped_model = KerasEval._strip_for_hls(model)
+
+        # --- Step 2: Configure hls4ml conversion ---
+        # Settings from ctx.hls4ml, following wa-hls4ml (Hawks et al.)
+        # and HEART 2025 (Que et al.):
+        #   - ap_fixed<16,6>: 16-bit fixed point, 6 integer bits (HEART 2025 §5.1)
+        #   - Resource strategy with io_stream for CNNs (wa-hls4ml §2.1.1)
+        #   - Kintex UltraScale KU115 at ~200MHz (HEART 2025 Table 5)
+        hls_config = hls4ml.utils.config_from_keras_model(
+            stripped_model, granularity='name'
+        )
+        hls_config['Model']['Precision'] = ctx.hls4ml.hls_precision
+        hls_config['Model']['ReuseFactor'] = ctx.hls4ml.hls_reuse_factor
+        hls_config['Model']['Strategy'] = ctx.hls4ml.hls_strategy
+
+        # --- Step 3: Generate hls4ml project in temp directory ---
+        project_dir = tempfile.mkdtemp(prefix='hls4ml_power_')
+        project_name = 'power_estimation_prj'
+        output_dir = os.path.join(project_dir, project_name)
+
+        hls_model = hls4ml.converters.convert_from_keras_model(
+            stripped_model,
+            hls_config=hls_config,
+            output_dir=output_dir,
+            io_type=ctx.hls4ml.hls_io_type,
+            clock_period=ctx.hls4ml.hls_clock_period,
+            part=ctx.hls4ml.hls_fpga_part,
+        )
+
+        # Compile and write the HLS C++ project files
+        hls_model.compile()
+        hls_model.write()
+
+        # Store project path for downstream Vivado synthesis
+        ctx.hls4ml.hls_project_dir = output_dir
+
+        # --- Step 4: Estimate MCD power ---
+        # TODO: Run Vivado synthesis + P&R on the generated project at
+        # ctx.hls4ml.hls_project_dir and parse the post-P&R power report
+        # to get single_pass_power_watts.
+        # For now, return NaN to indicate synthesis has not yet been run.
+        single_pass_power_watts = float('nan')
+
+        # Full MCD power = S × single-pass power.
+        # The same deterministic hardware is reused for each of the S
+        # stochastic forward passes (each with a different dropout mask
+        # applied in software/control logic). The circuit itself doesn't
+        # change between passes — only the mask does.
+        mcd_power_watts = num_mc_samples * single_pass_power_watts
+
+        return mcd_power_watts
+
+
+    def _strip_for_hls(model):
+        """
+        Return a clean Keras Sequential model suitable for hls4ml by:
+        - Unwrapping PruneLowMagnitude wrappers (preserving pruned weights)
+        - Removing InferenceDropoutLayer instances (no HLS template exists)
+
+        The pruned weights (with zeros) are kept intact — hls4ml's Resource
+        strategy can exploit the resulting sparsity.
+        """
+        import tensorflow as tf
+        from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
+        from logic.converter.keras.dropout.inference_layer import InferenceDropoutLayer
+
+        # If wrapped in a custom model class (e.g. MonteCarloDropoutModel),
+        # try to extract the inner Sequential
+        source = model
+        if hasattr(source, 'model') and isinstance(source.model, tf.keras.Model):
+            source = source.model
+
+        # Strip pruning wrappers if any layer is wrapped
+        has_pruning = any(
+            isinstance(layer, pruning_wrapper.PruneLowMagnitude)
+            for layer in source.layers
+        )
+        if has_pruning:
+            try:
+                from tensorflow_model_optimization.sparsity.keras import strip_pruning
+                source = strip_pruning(source)
+            except Exception:
+                # If strip_pruning fails, manually unwrap each layer below
+                pass
+
+        # Rebuild without dropout layers, manually unwrapping any
+        # remaining PruneLowMagnitude wrappers
+        clean = tf.keras.models.Sequential()
+        first = True
+
+        for layer in source.layers:
+            # Skip dropout — no HLS template
+            if isinstance(layer, InferenceDropoutLayer):
+                continue
+            if 'dropout' in layer.name.lower():
+                continue
+
+            # Manually unwrap PruneLowMagnitude if strip_pruning didn't catch it
+            if isinstance(layer, pruning_wrapper.PruneLowMagnitude):
+                # Extract the inner layer and its pruned weights
+                inner_layer = layer.layer
+                inner_config = inner_layer.get_config()
+
+                if first:
+                    if 'batch_input_shape' not in inner_config:
+                        inner_config['batch_input_shape'] = layer.input_shape
+                    first = False
+
+                new_layer = inner_layer.__class__.from_config(inner_config)
+                clean.add(new_layer)
+
+                # Copy the pruned weights (with zeros baked in).
+                # PruneLowMagnitude stores weights as [kernel, mask, threshold, ...]
+                # The actual pruned kernel = kernel * mask
+                pruned_weights = []
+                for w in inner_layer.get_weights():
+                    pruned_weights.append(w)
+                # If the inner layer has fewer weights than what we got,
+                # just take the first N matching the inner layer's weight shapes
+                inner_weight_shapes = [w.shape for w in new_layer.get_weights()]
+                final_weights = []
+                available = list(layer.get_weights())
+                for shape in inner_weight_shapes:
+                    for i, w in enumerate(available):
+                        if w.shape == shape:
+                            final_weights.append(w)
+                            available.pop(i)
+                            break
+                if final_weights:
+                    new_layer.set_weights(final_weights)
+            else:
+                layer_config = layer.get_config()
+
+                if first:
+                    if 'batch_input_shape' not in layer_config:
+                        layer_config['batch_input_shape'] = layer.input_shape
+                    first = False
+
+                new_layer = layer.__class__.from_config(layer_config)
+                clean.add(new_layer)
+                new_layer.set_weights(layer.get_weights())
+
+        return clean
 
     def evaluate_ece(ctx, y_prob) -> float:
         y_logits    = np.log(y_prob/(1-y_prob + 1e-15))

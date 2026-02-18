@@ -25,6 +25,28 @@ model:
   num_bayes_layer: 3
 
 # NOTE: introduce typing so that we can type dictionaries too
+
+S7:
+  accuracy: 
+    weight: 0.00
+    base: 0.99
+    min: 0.95
+  ece: 
+    weight: 0.00
+    base: 0.03
+  ape: 
+    weight: 0.00
+    base: 1.5
+  flops: 
+    weight: 0.00
+    base: 5340192
+  power:
+    weight: -1.00
+    base: 1.0
+
+  top_n: 1
+  name: Opt-Power
+
 S1:
   accuracy: 
     weight: 0.00
@@ -134,7 +156,7 @@ S6:
   name: Opt-Balanced
 
 strategy:
-  strategies: [ S1, S2, S3, S4, S5, S6 ]
+  strategies: [ S7 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -179,6 +201,7 @@ bayes_opt:
     ece: ((eval.ece))
     ape: ((eval.ape))
     flops: ((eval.flops))
+    power: ((eval.power))
 
 train:
   optimizer: <obj>
@@ -198,6 +221,16 @@ eval:
   num_eval_images: 200
   num_bins: 10
 
+# --- hls4ml power estimation config ---
+hls4ml:
+  num_mc_samples: ((eval.mc_samples))   # S forward passes, reuses mc_samples
+  hls_precision: "ap_fixed<16,6>"       # HEART 2025 §5.1: 16-bit, 6 integer bits
+  hls_reuse_factor: 1                   # 1 = max parallelism; increase for smaller area
+  hls_strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
+  hls_io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
+  hls_clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
+  hls_fpga_part: "xcku115-flvb2104-2-i" # Kintex UltraScale KU115 (HEART 2025 Table 5)
+  hls_project_dir: <str>                # set by evaluate_power at runtime
 
 reporter:
   log:
@@ -211,3 +244,4 @@ reporter:
     - ece
     - ape
     - score
+    - power
