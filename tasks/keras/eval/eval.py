@@ -12,6 +12,7 @@ from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wra
 
 from nautic import taskx
 from tasks.keras.trust.converter.dropout.mc_model import MonteCarloDropoutModel
+import os
 
 class KerasEval:
 
@@ -32,7 +33,7 @@ class KerasEval:
         ctx.eval.flops = KerasEval.evaluate_flops(ctx)
         ctx.eval.power = KerasEval.evaluate_power(ctx, model)
 
-    def evaluate_power(ctx, model) -> float:
+    def evaluate_power(ctx, model) -> float | None:
         """
         Estimate MCD power consumption by:
         1. Stripping non-synthesisable layers (dropout, pruning wrappers)
@@ -47,9 +48,13 @@ class KerasEval:
         See HEART 2025 (Que et al.), Table 5 — Vivado post-P&R power is
         reported for the deterministic backbone; MCD reuses it S times.
         """
+        import shutil
         import hls4ml
         import tempfile
-        import os
+
+        if shutil.which("vivado") is None:
+            ctx.log.warning("Vivado not found on PATH — skipping power estimation")
+            return None
 
         # Number of MC forward passes (default from eval.mc_samples)
         num_mc_samples = ctx.hls4ml.num_mc_samples
@@ -73,43 +78,138 @@ class KerasEval:
         hls_config['Model']['ReuseFactor'] = ctx.hls4ml.hls_reuse_factor
         hls_config['Model']['Strategy'] = ctx.hls4ml.hls_strategy
 
-        # --- Step 3: Generate hls4ml project in temp directory ---
+        # Generate hls4ml project in temp directory
         project_dir = tempfile.mkdtemp(prefix='hls4ml_power_')
         project_name = 'power_estimation_prj'
-        output_dir = os.path.join(project_dir, project_name)
+        hls_dir = os.path.join(project_dir, project_name)
 
         hls_model = hls4ml.converters.convert_from_keras_model(
             stripped_model,
             hls_config=hls_config,
-            output_dir=output_dir,
+            output_dir=hls_dir,
             io_type=ctx.hls4ml.hls_io_type,
             clock_period=ctx.hls4ml.hls_clock_period,
             part=ctx.hls4ml.hls_fpga_part,
         )
 
-        # Compile and write the HLS C++ project files
-        hls_model.compile()
+        # Write the HLS C++ project files, then run HLS synthesis to generate Verilog
         hls_model.write()
+        hls_model.build(csim=False, synth=True, cosim=False, export=False)
 
         # Store project path for downstream Vivado synthesis
-        ctx.hls4ml.hls_project_dir = output_dir
+        ctx.hls4ml.hls_project_dir = hls_dir
 
-        # --- Step 4: Estimate MCD power ---
-        # TODO: Run Vivado synthesis + P&R on the generated project at
-        # ctx.hls4ml.hls_project_dir and parse the post-P&R power report
-        # to get single_pass_power_watts.
-        # For now, return NaN to indicate synthesis has not yet been run.
-        single_pass_power_watts = float('nan')
+        power_watts = KerasEval._run_vivado_power_estimation(ctx, hls_dir, project_dir)
+
+        # in case of error for power estimation, skip the metric
+        if power_watts < 0:
+            return None
 
         # Full MCD power = S × single-pass power.
-        # The same deterministic hardware is reused for each of the S
-        # stochastic forward passes (each with a different dropout mask
-        # applied in software/control logic). The circuit itself doesn't
-        # change between passes — only the mask does.
-        mcd_power_watts = num_mc_samples * single_pass_power_watts
+        return num_mc_samples * power_watts
 
-        return mcd_power_watts
+    @staticmethod
+    def _run_vivado_power_estimation(ctx, hls_dir: str, output_dir: str) -> float:
+        import subprocess
+        from pathlib import Path
 
+        log = ctx.log
+
+        VIVADO_TIMEOUT = 40 * 60 # 40 minutes
+        original_dir = Path(os.getcwd())
+
+        tcl_script = original_dir / "vivado_power_estimation.tcl"
+        verilog_dir = Path(hls_dir)  / "myproject_prj" / "solution1" / "syn" / "verilog"
+        report_dir = Path(output_dir) / "power_report"
+
+        try:                
+            os.chdir(hls_dir)
+            log.info(f"Running Vivado power estimation")
+
+            # Run command exactly as you would in terminal
+            cmd = f'vivado -mode batch -source "{tcl_script.absolute()}" -tclargs "{verilog_dir.absolute()}" "{report_dir.absolute()}" myproject'
+
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=VIVADO_TIMEOUT)
+            returncode = result.returncode
+            
+            # Go back to original directory
+            os.chdir(original_dir)
+            if returncode == 0:
+                log.info(f"Power estimation completed successfully")
+
+                def _rows(xml_path: Path):
+                    import xml.etree.ElementTree as ET
+
+                    """Yield (label, [values...]) for every tablerow in the report."""
+                    root = ET.parse(xml_path).getroot()
+                    for row in root.iter("tablerow"):
+                        cells = [c.get("contents", "").strip() for c in row.findall("tablecell")]
+                        if cells and cells[0]:
+                            yield cells[0], cells[1:]
+
+                POWER_XML = report_dir / "power_summary.xml"
+
+                #Extract key power numbers (Watts) from a Vivado power report.
+                power_keys = {
+                    "Total On-Chip Power (W)": "total_power",
+                    "Dynamic (W)":             "dynamic_power",
+                    "Device Static (W)":       "static_power",
+                    "Junction Temperature (C)": "junction_temp_c",
+                    "Confidence Level":        "confidence",
+                }
+
+                power = {}
+                for label, values in _rows(POWER_XML):
+                    if label in power_keys and values:
+                        v = values[0]
+                        try:
+                            power[power_keys[label]] = float(v)
+                        except ValueError:
+                            power[power_keys[label]] = v
+
+                # UTILIZATION_XML = report_dir / "utilization.xml"
+                # util_keys = {
+                #     "CLB LUTs*":        "lut",
+                #     "  LUT as Logic":   "lut_logic",
+                #     "  LUT as Memory":  "lut_memory",
+                #     "CLB Registers":    "ff",
+                #     "Block RAM Tile":   "bram",
+                #     "URAM":             "uram",
+                #     "DSPs":             "dsp",
+                #     "Bonded IOB":       "io",
+                # }
+                # out = {}
+                # for label, values in _rows(UTILIZATION_XML):
+                #     if label in util_keys and len(values) >= 5:
+                #         used, _, _, available, util = values[:5]
+                #         out[util_keys[label]] = {
+                #             "used": float(used) if used else 0.0,
+                #             "available": float(available) if available else 0.0,
+                #             "util_pct": float(util.lstrip("<")) if util else 0.0,
+                #         }
+
+                return power["total_power"]
+                
+            else:
+                TAIL_OUTPUT = 100
+
+                all_output = (result.stdout or "") + "\n" + (result.stderr or "")
+                last_100 = "\n".join(all_output.splitlines()[-TAIL_OUTPUT:])
+                
+                log.error(f"Vivado failed with return code {returncode}")
+                log.error(f"Last {TAIL_OUTPUT} lines:\n{last_100}")
+        
+        except subprocess.TimeoutExpired:
+            log.error(f"Vivado timed out after {VIVADO_TIMEOUT}s limit")
+        
+        except Exception as e:
+            log.error(f"Error running Vivado: {e}")
+        
+        finally:
+            # Make sure we're back in the original directory even if something fails
+            os.chdir(original_dir)
+
+        return -1.0
 
     def _strip_for_hls(model):
         """

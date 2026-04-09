@@ -47,7 +47,7 @@ def perform_optimization(ctx):
             engine.keras.trust.build_bayesian_model()
 
             engine.keras.train_model()
-            engine.keras.eval()
+            engine.keras.eval.eval()
         
         engine.dse.show_best_parameters()
     

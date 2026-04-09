@@ -113,17 +113,22 @@ class BayesOpt:
         metric_values = {}
         for metric in bo.metrics.model_fields:
             metric_value = getattr(bo.metrics, metric).get()
+
+            # Skip metrics that could not be measured (e.g. power without Vivado)
+            if metric_value is None:
+                metric_values[metric] = None
+                continue
+
             metric_values[metric] = round(metric_value, 4)
 
             curr_metric_params = getattr(bo.curr_strategy, metric)
- 
+
             # If we don't satisfy the minimum or maximum constraints, we have the worst possible score
             if "min" in curr_metric_params.model_fields.keys():
                 is_penalised = metric_value < curr_metric_params.min
-            
+
             if "max" in curr_metric_params.model_fields.keys():
                 is_penalised = metric_value > curr_metric_params.max
-
 
             score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
 
