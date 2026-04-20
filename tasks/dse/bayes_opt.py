@@ -2,8 +2,6 @@ from bayes_opt import BayesianOptimization
 from nautic import taskx
 from tasks.strategy.strategy import Strategy
 
-
-
 class BayesOpt:
 
     SCORE_PENALTY = -1e6
@@ -114,10 +112,10 @@ class BayesOpt:
         for metric in bo.metrics.model_fields:
             metric_value = getattr(bo.metrics, metric).get()
 
-            # Skip metrics that could not be measured (e.g. power without Vivado)
+            # If we cannot properly evaluate, we cannot judge the model
             if metric_value is None:
-                metric_values[metric] = None
-                continue
+                is_penalised = True
+                break
 
             metric_values[metric] = round(metric_value, 4)
 

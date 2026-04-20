@@ -1,4 +1,6 @@
 
+from pathlib import Path
+
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -31,9 +33,12 @@ class KerasEval:
         ctx.eval.ece = KerasEval.evaluate_ece(ctx, y_prob)
         ctx.eval.ape = KerasEval.evaluate_ape(ctx, model)
         ctx.eval.flops = KerasEval.evaluate_flops(ctx)
-        ctx.eval.power = KerasEval.evaluate_power(ctx, model)
-
-    def evaluate_power(ctx, model) -> float | None:
+        ctx.eval.energy = KerasEval.evaluate_energy(ctx, model)
+        # TODO: decouple these evaluations with a map of things to update and the acc function, and do the same in bayes opt for logging
+        # TODO: decouple also the pareto frontier
+        # TODO: add also latency to the pareto front generated
+        
+    def evaluate_energy(ctx, model) -> float | None:
         """
         Estimate MCD power consumption by:
         1. Stripping non-synthesisable layers (dropout, pruning wrappers)
@@ -49,15 +54,18 @@ class KerasEval:
         reported for the deterministic backbone; MCD reuses it S times.
         """
         import shutil
-        import hls4ml
+        import hls4ml 
+                   
+        import logging
+        # silence hls4ml logs that aren't errors
+        logging.getLogger('hls4ml').setLevel(logging.ERROR)
+        
         import tempfile
 
         if shutil.which("vivado") is None:
             ctx.log.warning("Vivado not found on PATH — skipping power estimation")
             return None
 
-        # Number of MC forward passes (default from eval.mc_samples)
-        num_mc_samples = ctx.hls4ml.num_mc_samples
 
         # --- Step 1: Strip non-synthesisable layers ---
         # Dropout and pruning wrappers have no HLS template in hls4ml.
@@ -74,9 +82,35 @@ class KerasEval:
         hls_config = hls4ml.utils.config_from_keras_model(
             stripped_model, granularity='name'
         )
+        
+        for layer in stripped_model.layers:
+            if layer.name not in hls_config['LayerName']:
+                continue
+
+            rf = KerasEval.get_min_rf(layer, ctx.hls4ml.hls_fpga_part)
+
+            # Floor RF for conv layers to kernel area. Fully-parallel conv
+            # line buffers (RF=1) cause pathological HLS binding times —
+            # binding hangs for hours because every mul/add gets its own
+            # DSP and shift register in the sliding window.
+            if isinstance(layer, tf.keras.layers.Conv2D):
+                kh, kw = layer.kernel_size
+                rf = max(rf, kh * kw)
+            elif isinstance(layer, tf.keras.layers.Conv1D):
+                rf = max(rf, layer.kernel_size[0])
+
+            hls_config['LayerName'][layer.name]['ReuseFactor'] = rf
+
+            # Pin accumulator/result precision to stop hls4ml auto-widening
+            # (otherwise you get ap_fixed<19,...> which slows binding).
+            layer_cfg = hls_config['LayerName'][layer.name]
+            if isinstance(layer_cfg.get('Precision'), dict):
+                layer_cfg['Precision']['accum']  = ctx.hls4ml.hls_precision
+                layer_cfg['Precision']['result'] = ctx.hls4ml.hls_precision
+
         hls_config['Model']['Precision'] = ctx.hls4ml.hls_precision
-        hls_config['Model']['ReuseFactor'] = ctx.hls4ml.hls_reuse_factor
-        hls_config['Model']['Strategy'] = ctx.hls4ml.hls_strategy
+        hls_config['Model']['Strategy']  = ctx.hls4ml.hls_strategy
+        hls_config['Model']['ConvImplementation'] = 'LineBuffer'
 
         # Generate hls4ml project in temp directory
         project_dir = tempfile.mkdtemp(prefix='hls4ml_power_')
@@ -89,106 +123,192 @@ class KerasEval:
             output_dir=hls_dir,
             io_type=ctx.hls4ml.hls_io_type,
             clock_period=ctx.hls4ml.hls_clock_period,
-            part=ctx.hls4ml.hls_fpga_part,
+            part=ctx.hls4ml.hls_fpga_part
         )
+        
+        # ensures that the bayesian model is synthesised as a deterministic one
+        hls_model.config.config['Bayes'] = False
 
         # Write the HLS C++ project files, then run HLS synthesis to generate Verilog
         hls_model.write()
+        
+        # If the hls4ml fork still injects 'mask_index' into the C++, 
+        # this snippet comments it out before the build runs.
+        cpp_file = os.path.join(hls_dir, 'firmware', 'myproject.cpp')
+        if os.path.exists(cpp_file):
+            with open(cpp_file, 'r') as f:
+                lines = f.readlines()
+            with open(cpp_file, 'w') as f:
+                for line in lines:
+                    if 'mask_index' in line:
+                        f.write(f"// {line}") # Comment out the ghost interface
+                    else:
+                        f.write(line)
+        
         hls_model.build(csim=False, synth=True, cosim=False, export=False)
 
         # Store project path for downstream Vivado synthesis
         ctx.hls4ml.hls_project_dir = hls_dir
 
-        power_watts = KerasEval._run_vivado_power_estimation(ctx, hls_dir, project_dir)
+        power_est = KerasEval._run_vivado_power_estimation(ctx, hls_dir, project_dir)
 
         # in case of error for power estimation, skip the metric
-        if power_watts < 0:
+        if power_est is None:
             return None
+        
+        power_util, timing = power_est
 
-        # Full MCD power = S × single-pass power.
-        return num_mc_samples * power_watts
+        # We only focus on returning the dynamic power consumption, that is
+        # because the static power is mostly constant across fpga designs, and is influenced mostly by
+        # the choice of FPGA and not the design itself. 
+        return timing["t_total_sec"] * (power_util["power"]["dynamic"])
 
     @staticmethod
-    def _run_vivado_power_estimation(ctx, hls_dir: str, output_dir: str) -> float:
+    def get_min_rf(layer, fpga_part):
+        # True DSP usage is higher, but this approximation estimates a lower bound that is FPGA specific
+        DSP_COUNT = {
+            "xcku115-flvb2104-2-i": 5520,
+            "xcu250-figd2104-2l-e": 12288,
+        }
+        
+        weights = layer.get_weights()
+        if not weights:
+            return 1
+        
+        total = np.prod(weights[0].shape)
+        # fallback to 4096 if unknown
+        max_parallel = DSP_COUNT.get(fpga_part, 4096)  
+        
+        min_rf = max(1, int(np.ceil(total / max_parallel)))
+        
+        # round up to nearest valid divisor
+        return next(i for i in range(min_rf, total + 1) if total % i == 0)
+
+    @staticmethod
+    def _parse_timing_latency(report_dir: Path, hls_dir: str, num_samples: int, target_period_ns: float):
+        import xml.etree.ElementTree as ET
+        import re
+
+        # 1. Parse HLS Performance Estimates
+        hls_report = Path(hls_dir) / "myproject_prj" / "solution1" / "syn" / "report" / "myproject_csynth.xml"
+        latency = 0
+        
+        if hls_report.exists():
+            root = ET.parse(hls_report).getroot()
+            # Latency: Time for one sample to finish
+            lat_node = root.find(".//SummaryOfOverallLatency/Average-caseLatency")
+            latency = int(lat_node.text) if lat_node is not None else 0
+            
+            # Interval (II): Cycles between starting new samples
+            int_min_node = root.find(".//SummaryOfOverallLatency/Interval-min")
+            int_max_node = root.find(".//SummaryOfOverallLatency/Interval-max")
+
+            if int_min_node is not None and int_max_node is not None:
+                min_interval = int(int_min_node.text)
+                max_interval = int(int_max_node.text)
+            else:
+                min_interval = latency
+                max_interval = latency
+
+        # 2. Get Actual Clock Period from Vivado
+        timing_txt = report_dir / "timing_summary.txt"
+        actual_period_ns = target_period_ns
+        if timing_txt.exists():
+            with open(timing_txt, 'r') as f:
+                content = f.read()
+                match = re.search(r'WNS\(ns\)\s+.*?\s+(-?\d+\.\d+)', content)
+                if match:
+                    wns = float(match.group(1))
+                    if wns < 0:
+                        actual_period_ns = target_period_ns - wns
+
+        # Pipelined Design
+        # Total Cycles = Latency of first sample + (remaining samples * II)
+        if num_samples > 0:
+            min_cycles = latency + (num_samples - 1) * min_interval
+            max_cycles = latency + (num_samples - 1) * max_interval
+        else:
+            min_cycles = 0
+            max_cycles = 0
+            
+        t_min = min_cycles * (actual_period_ns * 1e-9)
+        t_max = max_cycles * (actual_period_ns * 1e-9)
+        
+        # we assume an average, as no variance is reported
+        t_total = (t_min + t_max) / 2
+
+        return {
+            "latency_cycles": latency,
+            "ii_min_cycles": min_interval,
+            "ii_max_cycles": max_interval,
+            "actual_period_ns": actual_period_ns,
+            "t_total_sec": t_total,
+            "t_min_sec": t_min,
+            "t_max_sec": t_max,
+        }
+                    
+    
+    @staticmethod
+    def _parse_power_utilization(report_dir):
+        import xml.etree.ElementTree as ET
+        
+        def _rows(xml_path):
+            if not xml_path.exists(): return
+            root = ET.parse(xml_path).getroot()
+            for row in root.iter("tablerow"):
+                cells = [c.get("contents", "").strip() for c in row.findall("tablecell")]
+                if cells and cells[0]:
+                    yield cells[0], cells[1:]
+
+        data = {"power": {}, "util": {}}
+        
+        # Parse Power
+        power_xml = report_dir / "power_summary.xml"
+        power_keys = {"Total On-Chip Power (W)": "total", "Dynamic (W)": "dynamic", "Device Static (W)": "static"}
+        for label, values in _rows(power_xml):
+            if label in power_keys and values:
+                data["power"][power_keys[label]] = float(values[0])
+
+        # Parse Utilization
+        util_xml = report_dir / "utilization.xml"
+        util_keys = {"CLB LUTs*": "lut", "DSPs": "dsp", "CLB Registers": "ff", "Block RAM Tile": "bram"}
+        for label, values in _rows(util_xml):
+            if label in util_keys and len(values) >= 1:
+                data["util"][util_keys[label]] = float(values[0])
+                
+        return data
+
+    @staticmethod
+    def _run_vivado_power_estimation(ctx, hls_dir: str, output_dir: str) -> tuple[dict, dict] | None:
         import subprocess
         from pathlib import Path
 
         log = ctx.log
 
-        VIVADO_TIMEOUT = 40 * 60 # 40 minutes
-        original_dir = Path(os.getcwd())
+        VIVADO_TIMEOUT = 180 * 60
+        original_dir = Path(__file__).resolve().parent
 
         tcl_script = original_dir / "vivado_power_estimation.tcl"
         verilog_dir = Path(hls_dir)  / "myproject_prj" / "solution1" / "syn" / "verilog"
         report_dir = Path(output_dir) / "power_report"
-
+        
         try:                
             os.chdir(hls_dir)
             log.info(f"Running Vivado power estimation")
 
-            # Run command exactly as you would in terminal
-            cmd = f'vivado -mode batch -source "{tcl_script.absolute()}" -tclargs "{verilog_dir.absolute()}" "{report_dir.absolute()}" myproject'
+            cmd = f'vivado -mode batch -source "{tcl_script.absolute()}" -tclargs "{verilog_dir.absolute()}" "{report_dir.absolute()}" "{ctx.hls4ml.hls_fpga_part}" myproject'
 
             result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=VIVADO_TIMEOUT)
             returncode = result.returncode
             
-            # Go back to original directory
             os.chdir(original_dir)
             if returncode == 0:
                 log.info(f"Power estimation completed successfully")
 
-                def _rows(xml_path: Path):
-                    import xml.etree.ElementTree as ET
-
-                    """Yield (label, [values...]) for every tablerow in the report."""
-                    root = ET.parse(xml_path).getroot()
-                    for row in root.iter("tablerow"):
-                        cells = [c.get("contents", "").strip() for c in row.findall("tablecell")]
-                        if cells and cells[0]:
-                            yield cells[0], cells[1:]
-
-                POWER_XML = report_dir / "power_summary.xml"
-
-                #Extract key power numbers (Watts) from a Vivado power report.
-                power_keys = {
-                    "Total On-Chip Power (W)": "total_power",
-                    "Dynamic (W)":             "dynamic_power",
-                    "Device Static (W)":       "static_power",
-                    "Junction Temperature (C)": "junction_temp_c",
-                    "Confidence Level":        "confidence",
-                }
-
-                power = {}
-                for label, values in _rows(POWER_XML):
-                    if label in power_keys and values:
-                        v = values[0]
-                        try:
-                            power[power_keys[label]] = float(v)
-                        except ValueError:
-                            power[power_keys[label]] = v
-
-                # UTILIZATION_XML = report_dir / "utilization.xml"
-                # util_keys = {
-                #     "CLB LUTs*":        "lut",
-                #     "  LUT as Logic":   "lut_logic",
-                #     "  LUT as Memory":  "lut_memory",
-                #     "CLB Registers":    "ff",
-                #     "Block RAM Tile":   "bram",
-                #     "URAM":             "uram",
-                #     "DSPs":             "dsp",
-                #     "Bonded IOB":       "io",
-                # }
-                # out = {}
-                # for label, values in _rows(UTILIZATION_XML):
-                #     if label in util_keys and len(values) >= 5:
-                #         used, _, _, available, util = values[:5]
-                #         out[util_keys[label]] = {
-                #             "used": float(used) if used else 0.0,
-                #             "available": float(available) if available else 0.0,
-                #             "util_pct": float(util.lstrip("<")) if util else 0.0,
-                #         }
-
-                return power["total_power"]
+                power_util = KerasEval._parse_power_utilization(report_dir)
+                timing = KerasEval._parse_timing_latency(report_dir, hls_dir, ctx.hls4ml.num_mc_samples.get(), ctx.hls4ml.hls_clock_period)
+                
+                return power_util, timing
                 
             else:
                 TAIL_OUTPUT = 100
@@ -209,96 +329,49 @@ class KerasEval:
             # Make sure we're back in the original directory even if something fails
             os.chdir(original_dir)
 
-        return -1.0
+        # return nothing on an erroneous execution
+        return None
 
+    @staticmethod
     def _strip_for_hls(model):
-        """
-        Return a clean Keras Sequential model suitable for hls4ml by:
-        - Unwrapping PruneLowMagnitude wrappers (preserving pruned weights)
-        - Removing InferenceDropoutLayer instances (no HLS template exists)
-
-        The pruned weights (with zeros) are kept intact — hls4ml's Resource
-        strategy can exploit the resulting sparsity.
-        """
         import tensorflow as tf
-        from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
+        from tensorflow_model_optimization.sparsity.keras import strip_pruning
         from logic.converter.keras.dropout.inference_layer import InferenceDropoutLayer
 
-        # If wrapped in a custom model class (e.g. MonteCarloDropoutModel),
-        # try to extract the inner Sequential
+        # 1. Extract the inner model if wrapped (e.g., MonteCarloDropoutModel)
         source = model
         if hasattr(source, 'model') and isinstance(source.model, tf.keras.Model):
             source = source.model
 
-        # Strip pruning wrappers if any layer is wrapped
-        has_pruning = any(
-            isinstance(layer, pruning_wrapper.PruneLowMagnitude)
-            for layer in source.layers
-        )
-        if has_pruning:
-            try:
-                from tensorflow_model_optimization.sparsity.keras import strip_pruning
-                source = strip_pruning(source)
-            except Exception:
-                # If strip_pruning fails, manually unwrap each layer below
-                pass
+        # 2. Safely strip pruning wrappers
+        # This bakes the masks into the weights (zeros remain zeros)
+        try:
+            source = strip_pruning(source)
+        except Exception:
+            # If not a pruned model, continue with the source as-is
+            pass
 
-        # Rebuild without dropout layers, manually unwrapping any
-        # remaining PruneLowMagnitude wrappers
+        # 3. Rebuild as a clean Sequential backbone
         clean = tf.keras.models.Sequential()
-        first = True
+        input_shape = source.input_shape[1:] # Exclude batch dimension
 
-        for layer in source.layers:
-            # Skip dropout — no HLS template
-            if isinstance(layer, InferenceDropoutLayer):
+        for i, layer in enumerate(source.layers):
+            # Skip all forms of Dropout
+            is_dropout = (
+                isinstance(layer, (tf.keras.layers.Dropout, InferenceDropoutLayer)) or 
+                'dropout' in layer.name.lower()
+            )
+            if is_dropout:
                 continue
-            if 'dropout' in layer.name.lower():
-                continue
 
-            # Manually unwrap PruneLowMagnitude if strip_pruning didn't catch it
-            if isinstance(layer, pruning_wrapper.PruneLowMagnitude):
-                # Extract the inner layer and its pruned weights
-                inner_layer = layer.layer
-                inner_config = inner_layer.get_config()
-
-                if first:
-                    if 'batch_input_shape' not in inner_config:
-                        inner_config['batch_input_shape'] = layer.input_shape
-                    first = False
-
-                new_layer = inner_layer.__class__.from_config(inner_config)
-                clean.add(new_layer)
-
-                # Copy the pruned weights (with zeros baked in).
-                # PruneLowMagnitude stores weights as [kernel, mask, threshold, ...]
-                # The actual pruned kernel = kernel * mask
-                pruned_weights = []
-                for w in inner_layer.get_weights():
-                    pruned_weights.append(w)
-                # If the inner layer has fewer weights than what we got,
-                # just take the first N matching the inner layer's weight shapes
-                inner_weight_shapes = [w.shape for w in new_layer.get_weights()]
-                final_weights = []
-                available = list(layer.get_weights())
-                for shape in inner_weight_shapes:
-                    for i, w in enumerate(available):
-                        if w.shape == shape:
-                            final_weights.append(w)
-                            available.pop(i)
-                            break
-                if final_weights:
-                    new_layer.set_weights(final_weights)
-            else:
-                layer_config = layer.get_config()
-
-                if first:
-                    if 'batch_input_shape' not in layer_config:
-                        layer_config['batch_input_shape'] = layer.input_shape
-                    first = False
-
-                new_layer = layer.__class__.from_config(layer_config)
-                clean.add(new_layer)
-                new_layer.set_weights(layer.get_weights())
+            # Get config and ensure the first layer has the correct input shape
+            config = layer.get_config()
+            if len(clean.layers) == 0:
+                config['batch_input_shape'] = (None,) + input_shape
+                
+            new_layer = layer.__class__.from_config(config)
+            clean.add(new_layer)
+            new_layer.set_weights(layer.get_weights())
 
         return clean
 
