@@ -31,6 +31,7 @@ class KerasExperiment:
             if use_cpu:
                 try:
                     # Make no GPUs visible (force CPU mode)
+                    os.environ["CUDA_VISIBLE_DEVICES"] = ""
                     tf.config.set_visible_devices([], 'GPU')
                     log.info("🚫 GPU usage disabled — running on CPU only.")
                 except RuntimeError as e:

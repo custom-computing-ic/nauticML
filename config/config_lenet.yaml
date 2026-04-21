@@ -4,7 +4,7 @@ experiment:
   seed: 42
   save_dir: ./prj/exp_mnist_bayes_lenet_try
   save_model: mnist_bayes_lenet_10samples_mc
-  gpus: [0]
+  cpu: True
   ckpt_file: best_chkp.tf
 
 dataset:
@@ -225,13 +225,18 @@ eval:
 # hls4ml energy estimation config
 hls4ml:
   num_mc_samples: ((eval.mc_samples)) 
-  hls_precision: "ap_fixed<16,6>"       # HEART 2025 §5.1: 16-bit, 6 integer bits
-  hls_reuse_factor: 1                   
-  hls_strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
-  hls_io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
-  hls_clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
-  hls_fpga_part: "xcku115-flvb2104-2-i" # Kintex UltraScale KU115 (HEART 2025 Table 5)
-  hls_project_dir: <str>                
+  hls_project_dir: <str>    
+
+  power_mode: # three modes, vectorless, saif_synth and saif_impl in terms of refined accuracy. saif ones need also num_samples
+    mode: "saif_synth" 
+    num_samples: 64
+
+  hls_config:
+    precision: "ap_fixed<16,6>"       # HEART 2025 §5.1: 16-bit, 6 integer bits
+    strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
+    io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
+    clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
+    fpga_part: "xcku115-flvb2104-2-i" # Kintex UltraScale KU115 (HEART 2025 Table 5)
 
 reporter:
   log:
