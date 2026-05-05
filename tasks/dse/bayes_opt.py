@@ -1,99 +1,122 @@
-import pandas as pd
 from bayes_opt import BayesianOptimization
 from nautic import taskx
+from tasks.strategy.strategy import Strategy
 
 class BayesOpt:
+
+    @taskx
+    def initialise_bayesian_opt(ctx):
+        bo = ctx.bayes_opt
+        bo.score = None
+        
+        bo.iteration = 0
+        bo.summary = []
+
+        pbounds = { }
+        tune_vals = { }
+        tune_space = { }
+        bo.control.params = { }
+        
+        for key in bo.tunable.model_fields:
+            opt = getattr(bo.tunable, key)
+            if isinstance(opt.space, list):
+                pbounds[key] = (0, len(opt.space) - 0.001)
+            else:
+                raise ValueError(f"Unsupported space type for {key}: {type(opt.space)}")
+
+            tune_vals[key] = opt.value
+            tune_space[key] = opt.space
+            
+        bo.control.params['values'] = tune_vals
+        bo.control.params['space'] = tune_space
+
+        bo.engine = BayesianOptimization(
+            f = None,
+            pbounds=pbounds,
+            random_state=bo.seed.get(),
+            allow_duplicate_points=True
+        )
+
+        bo.curr_strategy = Strategy.get_curr_strategy_object(ctx)
+
     @taskx
     def bayesian_opt(ctx):
         bo = ctx.bayes_opt
+        engine = bo.engine
+
         bo.score = None
         log = ctx.log
 
-        if bo.engine is None:
-            bo.iteration = 0
-            bo.summary = []
+        if bo.iteration == 0:
+            # Initial random points, use rng to make deterministic
+            rng = bo.engine._random_state                      
 
-            pbounds = { }
-            tune_vals = { }
-            tune_space = { }
-            bo.control.params = { }
-            for key in bo.tunable.model_fields:
-                opt = getattr(bo.tunable, key)
-                if isinstance(opt.space, list):
-                    pbounds[key] = (0, len(opt.space) - 0.001)
-                else:
-                    raise ValueError(f"Unsupported space type for {key}: {type(opt.space)}")
-
-                tune_vals[key] = opt.value
-                tune_space[key] = opt.space
-            bo.control.params['values'] = tune_vals
-            bo.control.params['space'] = tune_space
-
-            bo.control.metrics = {}
-            metrics_values = {}
-            for key in bo.metrics.model_fields:
-                metrics_values[key] = getattr(bo.metrics, key)
-            bo.control.metrics['values'] = metrics_values
-
-            score_weights = { }
-            for key in bo.score_weights.model_fields:
-                score_weights[key] = getattr(bo.score_weights, key)
-            bo.control.metrics['score_weights'] = score_weights
-
-            bo.engine = BayesianOptimization(
-                f = None,
-                pbounds=pbounds,
-                random_state=bo.seed.get(),
-                allow_duplicate_points=True
-            )
-
-            # Initial random points
             for _ in range(1):
-                bo.control.suggests = dict(zip(pbounds.keys(),
-                                               bo.engine._space.random_sample()))
+                bo.control.suggests = dict(
+                zip(
+                    bo.tunable.model_fields,
+                    rng.uniform(
+                        bo.engine._space.bounds[:, 0],
+                        bo.engine._space.bounds[:, 1]
+                    )
+                )
+            )
+                
         else:
-            bo.iteration += 1
-            engine = bo.engine
-
-            score = 0
-            for key in bo.control.metrics['values']:
-                metric_value = bo.control.metrics['values'][key].get()
-                base_value = bo.control.metrics['score_weights'][key].base
-                weight_value = bo.control.metrics['score_weights'][key].weight
-
-                score += float(metric_value / base_value) * float(weight_value)
-
-            bo.score = score
-            engine.register(params=bo.control.suggests,
-                            target=bo.score)
+            BayesOpt.record_iteration(bo, engine, log)
             bo.control.suggests = bo.engine.suggest()
 
-        summary = { 'iteration': bo.iteration,
-                    'score': "n/a" if bo.score is None else round(bo.score, 4)}
+        bo.iteration += 1
+        bo.terminate = not (bo.iteration <= bo.num_iter)
 
-        # set the parameters for other tasks
+        metric_values = BayesOpt.suggest_to_values(bo)
+
+        # update the refs to reflect the new values
+        for key, value in metric_values.items():
+            bo.control.params['values'][key].set(value)
+
+    # Records current iteration suggest into a summary
+    @staticmethod
+    def record_iteration(bo, engine, log):
+        score = 0
+        summary = {
+            'iteration': bo.iteration
+        }
+
+        metric_values = {}
+        for metric in bo.metrics.model_fields:
+            metric_value = getattr(bo.metrics, metric).get()
+            curr_metric_params = getattr(bo.curr_strategy, metric)
+
+            score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
+            metric_values[metric] = round(metric_value, 4)
+
+        metric_values["score"] = score
+        summary["metrics"] = metric_values
+        
+        bo.score = score
+
+        summary["hyperparameters"] = BayesOpt.suggest_to_values(bo)
+            
+        bo.summary.append(summary)
+        log.artifact(key=f'bayes-iteration-summary-strategy-{bo.curr_strategy.name}'.lower(),
+                    table=bo.summary)
+
+        engine.register(params=bo.control.suggests,
+                        target=bo.score)
+
+    # This method converts the suggest into a dictionary of hyper-parameters
+    @staticmethod
+    def suggest_to_values(bo):
+        hyperparams = {}
+
         for key, value in bo.control.suggests.items():
             idx = int(value)
-            metric_val = bo.control.params['space'][key][idx]
-            summary[key] = metric_val
-            bo.control.params['values'][key].set(metric_val)
+            hyperparams[key] = bo.control.params['space'][key][idx]
 
-        bo.summary.append(summary)
-        log.artifact(key='bayes-iteration-summary',
-                     table=bo.summary)
-
-
-        bo.terminate = not (bo.iteration < bo.num_iter)
-
-
-
-
-        # cfg.model.dropout_rate = cfg.search_space.dropout_rate_list[int(tune_params["dropout_rate"])]
-        # cfg.model.p_rate = cfg.search_space.p_rate_list[int(tune_params["p_rate"])]
-        # cfg.model.num_bayes_layer =  cfg.search_space.num_bayes_layer_list[int(tune_params["num_bayes_layer"])]
-        # cfg.model.scale_factor = cfg.search_space.scale_factor_list[int(tune_params["scale_factor"])]
-
-
+        return hyperparams       
+       
+       
         # # Create a table artifact
         # create_table_artifact(
         #     key=f"bayes-iteration-{cfg.bayes_opt.iteration}",
@@ -110,4 +133,3 @@ class BayesOpt:
         #     description="Bayesian Optimization Step Summary"
         # )
         # return cfg
-

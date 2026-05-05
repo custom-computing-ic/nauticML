@@ -28,7 +28,7 @@ An orchestration framework for co-optimizing neural network models on hardware p
    
    Once it is created:
    ```bash
-   conda activate nauticml
+   conda activate nauticML
    ```   
 
 3. **Start Prefect and PostgreSQL services**

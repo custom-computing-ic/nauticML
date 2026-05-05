@@ -175,14 +175,6 @@ def train_model(cfg):
 
         callbacks.append(PrintEpochCallback())
 
-
-
-        logger.info(f"p_rate: {cfg.model.p_rate}")
-        logger.info(f"batch_size: {cfg.training.batch_size}")
-        logger.info(f"num_epoch: {cfg.training.num_epoch}")
-        logger.debug(f"validation_split: {cfg.training.validation_split}")
-
-
         def hash_model(model):
             import hashlib
             import json

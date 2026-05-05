@@ -1,10 +1,10 @@
 from tensorflow.keras.models import Sequential
 from tensorflow.keras import activations
-from keras.layers import Dense, Activation, \
+from tensorflow.keras.layers import Dense, Activation, \
                          Flatten, \
                          Conv2D, MaxPool2D
 
-from keras.optimizers import SGD
+from tensorflow.keras.optimizers import SGD
 
 from tasks.keras.trust.converter.uncertainty_factory import get_uncertainty_layer
 
