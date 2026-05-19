@@ -13,7 +13,7 @@ from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wra
 
 from tasks.keras.trust.converter.dropout.mc_model import MonteCarloDropoutModel
 
-from tasks.keras.eval.energy_eval import KerasEnergy
+from tasks.keras.eval.power.power_eval import KerasEnergy
 
 class KerasEval:
 
