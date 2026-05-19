@@ -150,4 +150,13 @@ module power_tb;
                  N_SAMPLES, skipped_x);
         $finish;
     end
+
+    // Progress heartbeat — prints every 5000 cycles so a slow sim shows
+    // life in xsim.log instead of looking hung.
+    always @(posedge ap_clk) begin
+        if (reset_done && (cycle_count % 5000 == 0)) begin
+            $display("[%0t] cycle=%0d fed=%0d cap=%0d skipped_x=%0d in_tvalid=%b in_tready=%b out_tvalid=%b",
+                     $time, cycle_count, fed, captured, skipped_x, in_tvalid, in_tready, out_tvalid);
+        end
+    end
 endmodule

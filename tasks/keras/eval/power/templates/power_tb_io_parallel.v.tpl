@@ -174,13 +174,13 @@ module power_tb;
         $finish;
     end
 
-    // Periodic progress logging — leave commented out for SAIF runs.
-    // Uncomment to debug a hang (handshake stuck, capture_vld silent, etc.).
-    // always @(posedge ap_clk) begin
-    //     if (cycle_count % 5000 == 0) begin
-    //         $display("[%0t] cycle=%0d reset_done=%b run=%b done=%b start=%b ready=%b idle=%b done_dut=%b vld=%b fed=%0d cap=%0d skipped_x=%0d",
-    //                  $time, cycle_count, reset_done, run, done_flag, ap_start, ap_ready, ap_idle, ap_done, input_vld, fed, captured, skipped_x);
-    //     end
-    // end
+    // Progress heartbeat — prints every 5000 cycles so a slow sim shows
+    // life in xsim.log instead of looking hung.
+    always @(posedge ap_clk) begin
+        if (cycle_count % 5000 == 0) begin
+            $display("[%0t] cycle=%0d reset_done=%b run=%b done=%b start=%b ready=%b idle=%b done_dut=%b vld=%b fed=%0d cap=%0d skipped_x=%0d",
+                     $time, cycle_count, reset_done, run, done_flag, ap_start, ap_ready, ap_idle, ap_done, input_vld, fed, captured, skipped_x);
+        end
+    end
 
 endmodule
