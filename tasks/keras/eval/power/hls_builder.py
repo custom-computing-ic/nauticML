@@ -100,24 +100,38 @@ class HLSBuilder:
             stripped_model, granularity="name"
         )
 
-        # Flat ReuseFactor across all Dense/Conv layers — pinned via config so
-        # max(RF) stays constant between DSE iterations (architecture varies
-        # but RF doesn't, which keeps the power/RF axis controllable).
+        # Compute each layer's natural min RF (existing per-layer logic), then
+        # pin only the worst layer(s) — those whose natural min_rf equals the
+        # max across the model — to the configured target. max(RF) stays
+        # constant between DSE iterations (the bound is the config value, not
+        # the architecture); smaller layers keep their natural RF and stay
+        # efficient.
         target_rf = ctx.hls4ml.hls_config.reuse_factor
+        fpga_part = ctx.hls4ml.hls_config.fpga_part
+
+        natural_rfs = {
+            layer.name: HLSBuilder.get_min_rf(layer, fpga_part)
+            for layer in stripped_model.layers
+            if layer.name in hls_config["LayerName"]
+        }
+        
+        worst_rf = max(natural_rfs.values()) if natural_rfs else 0
+        if worst_rf > target_rf:
+            worst_layer = max(natural_rfs, key=natural_rfs.get)
+            raise RuntimeError(
+                f"Configured reuse_factor={target_rf} is below worst-layer "
+                f"natural min RF: {worst_layer!r} requires {worst_rf} "
+                f"(io_stream Conv needs RF >= kh*kw*n_chan). "
+                f"Raise hls_config.reuse_factor in the config."
+            )
 
         for layer in stripped_model.layers:
             if layer.name not in hls_config["LayerName"]:
                 continue
 
-            min_rf = HLSBuilder.get_min_rf(layer, ctx.hls4ml.hls_config.fpga_part)
-            if target_rf < min_rf:
-                raise RuntimeError(
-                    f"Configured reuse_factor={target_rf} is below layer "
-                    f"{layer.name!r}'s required minimum {min_rf} "
-                    f"(io_stream Conv needs RF >= kh*kw*n_chan). "
-                    f"Raise hls_config.reuse_factor in the config."
-                )
-            hls_config["LayerName"][layer.name]["ReuseFactor"] = target_rf
+            natural_rf = natural_rfs[layer.name]
+            rf = target_rf if natural_rf == worst_rf else natural_rf
+            hls_config["LayerName"][layer.name]["ReuseFactor"] = rf
 
             # Pin accumulator/result precision so hls4ml doesn't auto-widen.
             layer_cfg = hls_config["LayerName"][layer.name]
