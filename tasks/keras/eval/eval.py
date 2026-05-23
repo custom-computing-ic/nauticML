@@ -8,7 +8,7 @@ from tensorflow.python.framework.convert_to_constants import (
     convert_variables_to_constants_v2_as_graph,
 )
 from sklearn.metrics import accuracy_score
-from logic.converter.keras.dropout.inference_layer import InferenceDropoutLayer
+from logic.converter.keras.dropout.inference_layer import BayesianDropout
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wrapper
 
 from tasks.keras.trust.converter.dropout.mc_model import MonteCarloDropoutModel
@@ -20,7 +20,7 @@ class KerasEval:
     @taskx
     def eval(ctx):
 
-        co = {  "InferenceDropoutLayer": InferenceDropoutLayer,
+        co = {  "BayesianDropout": BayesianDropout,
             "MonteCarloDropoutModel": MonteCarloDropoutModel,
             "PruneLowMagnitude": pruning_wrapper.PruneLowMagnitude
         }

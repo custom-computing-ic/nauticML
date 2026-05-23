@@ -167,51 +167,35 @@ class HLSBuilder:
     @staticmethod
     def strip_for_hls(model):
         """
-        Unwrap MCD, strip pruning wrappers, drop dropout layers. Asserts the
-        topology is single-input / single-output / linear — Sequential rebuild
-        can't represent anything else and we'd rather fail loud than produce
-        a model with silently-dropped branches.
+        Unwrap MCD wrapper, strip pruning wrappers, and rebuild as a clean
+        Sequential. BayesianDropout layers are kept so they are synthesised
+        into hardware by the forked hls4ml.
         """
         from tensorflow_model_optimization.sparsity.keras import strip_pruning
-        from logic.converter.keras.dropout.inference_layer import InferenceDropoutLayer
+        from logic.converter.keras.dropout.inference_layer import BayesianDropout
 
         # 1. Extract the inner model if wrapped (e.g., MonteCarloDropoutModel).
         source = model
         if hasattr(source, "model") and isinstance(source.model, tf.keras.Model):
             source = source.model
 
-        # # 2. Strip pruning wrappers if present. Tightened except: only swallow
-        # # the specific "not a pruned model" case, not arbitrary errors.
-        # has_pruning = any(
-        #     isinstance(l, pruning_wrapper.PruneLowMagnitude) for l in source.layers
-        # )
-        # if has_pruning:
         source = strip_pruning(source)
 
-        # 3. Topology guardrail: Sequential rebuild only works for linear models.
+        # 2. Topology guardrail: Sequential rebuild only works for linear models.
         if len(source.outputs) != 1:
             raise RuntimeError(
                 f"strip_for_hls expects a single-output model, got {len(source.outputs)}"
             )
-        
-        # Topology guardrail: Sequential rebuild only works for single-output models.
-        # Branching (multi-input layers like Add/Concatenate) will fail at clean.add()
-        # with a clear Keras error, so we don't pre-check for it.
-        if len(source.outputs) != 1:
-            raise RuntimeError(
-                f"strip_for_hls expects a single-output model, got {len(source.outputs)}"
-            )
-                            
-        # 4. Rebuild as a clean Sequential backbone.
+
+        # 3. Rebuild as a clean Sequential backbone, keeping BayesianDropout
+        #    layers so they are synthesised into hardware by the forked hls4ml.
         clean = tf.keras.models.Sequential()
         input_shape = source.input_shape[1:]  # exclude batch dim
 
         for layer in source.layers:
-            is_dropout = (
-                isinstance(layer, (tf.keras.layers.Dropout, InferenceDropoutLayer))
-                or "dropout" in layer.name.lower()
-            )
-            if is_dropout:
+            # Strip standard Keras Dropout (not used for Bayesian inference)
+            # but keep BayesianDropout — hls4ml has a registered handler for it.
+            if isinstance(layer, tf.keras.layers.Dropout):
                 continue
 
             config = layer.get_config()

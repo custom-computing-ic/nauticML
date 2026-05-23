@@ -21,7 +21,7 @@ from prefect.artifacts import create_table_artifact, \
 from prefect import get_run_logger
 
 from logic.models.lenet import LeNet
-from logic.converter.keras.dropout.inference_layer import InferenceDropoutLayer
+from logic.converter.keras.dropout.inference_layer import BayesianDropout
 from logic.converter.keras.dropout.mc_model import MonteCarloDropoutModel
 import tensorflow_probability as tfp
 
@@ -335,7 +335,7 @@ def eval_trust(cfg):
         entropy = -np.sum(np.log(output+1e-8)*output)/batch_size
         return entropy
 
-    co = {  "BayesianDropout": InferenceDropoutLayer,
+    co = {  "BayesianDropout": BayesianDropout,
             "MCDropout": MonteCarloDropoutModel,
             # "Masksembles": Masksembles,
             # "MasksemblesModel": MasksemblesModel,
