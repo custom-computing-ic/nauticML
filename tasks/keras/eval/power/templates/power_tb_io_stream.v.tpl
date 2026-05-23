@@ -11,6 +11,8 @@ module power_tb;
     parameter OUT_TDATA_WIDTH  = {out_tdata_width};
     parameter N_SAMPLES        = {n_samples};
     parameter BEATS_PER_SAMPLE = {beats_per_sample};
+    parameter OUT_BEATS_PER_SAMPLE = {out_beats_per_sample};
+    parameter TOTAL_OUT_BEATS  = N_SAMPLES * OUT_BEATS_PER_SAMPLE;
     parameter TOTAL_IN_BEATS   = N_SAMPLES * BEATS_PER_SAMPLE;
     parameter RESET_CYCLES     = 60;
     parameter TAIL_CYCLES      = 200;
@@ -103,9 +105,6 @@ module power_tb;
 
     // ----------------------------------------------------------------
     // Capture + timeout.
-    // - Skip X-beats silently (DUT pipeline flush during startup).
-    // - Don't start counting "captured" until the first non-X output is
-    //   seen, then collect N_SAMPLES of real data.
     // ----------------------------------------------------------------
     always @(posedge ap_clk) begin
         if (!reset_done) begin
@@ -118,20 +117,25 @@ module power_tb;
             cycle_count <= cycle_count + 1;
 
             if (cycle_count > TIMEOUT_CYCLES) begin
-                $display("ERROR: timeout after %0d cycles, fed %0d, captured %0d/%0d, skipped_x %0d, first_valid_seen=%0b",
-                         cycle_count, fed, captured, N_SAMPLES, skipped_x, first_valid_seen);
+                $display("ERROR: timeout after %0d cycles, fed %0d, captured %0d/%0d, skipped_x %0d",
+                         cycle_count, fed, captured, TOTAL_OUT_BEATS, skipped_x);
                 $fclose(fd);
                 $finish;
             end
 
             if (out_tvalid && out_tready) begin
-                if ((^out_tdata) === 1'bx) begin
+                // Double-braces so Python format() renders a Verilog replication
+                if (out_tdata === {{{{OUT_TDATA_WIDTH{{1'bx}}}}}}) begin
                     skipped_x <= skipped_x + 1;
                 end else begin
                     first_valid_seen <= 1'b1;
                     $fwrite(fd, "%h\n", out_tdata);
                     captured <= captured + 1;
-                    if (captured + 1 >= N_SAMPLES) begin
+
+                    // Compare against TOTAL_OUT_BEATS so models whose output
+                    // packs into >1 beat per sample (conv classifiers with
+                    // wide channel counts) collect the full N_SAMPLES worth.
+                    if (captured + 1 >= TOTAL_OUT_BEATS) begin
                         done_flag <= 1'b1;
                     end
                 end

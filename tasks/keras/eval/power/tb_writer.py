@@ -1,3 +1,4 @@
+import math
 from pathlib import Path
 
 from tasks.keras.eval.power.port_parser import PortParser
@@ -50,7 +51,9 @@ class TestbenchWriter:
 
     @staticmethod
     def estimate_timeout_cycles(qmodel, hls_config, n_samples, io_type,
-                                safety=2, floor=200_000):
+                                safety=2, floor=200_000,
+                                in_beats_per_sample=1,
+                                out_beats_per_sample=1):
         """
         Conservative cycle budget for the power TB based on max layer II.
 
@@ -104,7 +107,79 @@ class TestbenchWriter:
                 max_ii = ii
 
         fill = 50_000 if io_type == "io_stream" else 10_000
-        return max(floor, max_ii * int(n_samples) * int(safety) + fill)
+
+        # Compute-bound: how long the pipeline takes per sample × samples.
+        compute_cycles = max_ii * int(n_samples)
+
+        # Stream-bound: input has to enter and output has to drain. With
+        # backpressure these don't fully overlap, so add them and account for
+        # ~50% effective throughput from observed in_tready toggling.
+        if io_type == "io_stream":
+            stream_cycles = int(n_samples) * (int(in_beats_per_sample) + int(out_beats_per_sample)) * 2
+        else:
+            stream_cycles = 0
+
+        bound = max(compute_cycles, stream_cycles)
+        return max(floor, bound * int(safety) + fill)
+
+    @staticmethod
+    def output_beats_per_sample(qmodel, ports, out_elem_width):
+        """
+        Number of output stream beats per inference.
+
+        The output layer's flat element count is packed into TDATA chunks of
+        width `out_elem_width`. One beat carries floor(TDATA / elem_width)
+        elements, so beats_per_sample = ceil(n_elements / elems_per_beat).
+        """
+        last_shape = qmodel.layers[-1].output_shape
+        if isinstance(last_shape, list):
+            last_shape = last_shape[0]
+        n_elements = 1
+        for d in last_shape:
+            if d is None:
+                continue
+            n_elements *= int(d)
+
+        tdata_w = ports["output_stream"]["tdata_width"]
+        if tdata_w % out_elem_width != 0:
+            raise ValueError(
+                f"output TDATA width {tdata_w} not divisible by "
+                f"element width {out_elem_width}"
+            )
+        elems_per_beat = tdata_w // out_elem_width
+        return math.ceil(n_elements / elems_per_beat)
+
+    @staticmethod
+    def output_precision_WI(qmodel, hls_config):
+        """
+        Returns (W, I) for the final output layer's `result` precision.
+
+        Falls back to the model default if the per-layer entry is missing,
+        "auto", or not a fixed<...>/ap_fixed<...>/ufixed<...>/ap_ufixed<...>
+        spec. Single source of truth: writer uses W to compute
+        out_beats_per_sample, decoder uses (W, I) to convert hex back to
+        float — disagreement scales captured magnitudes by 2^(ΔI).
+        """
+        last_name = qmodel.layers[-1].name
+        prec = (
+            hls_config.get("LayerName", {})
+            .get(last_name, {})
+            .get("Precision", {})
+        )
+        if isinstance(prec, dict):
+            prec = prec.get("result")
+
+        valid_prefix = ("fixed<", "ufixed<", "ap_fixed<", "ap_ufixed<")
+        if not prec or prec == "auto" or not isinstance(prec, str) or not prec.startswith(valid_prefix):
+            default = hls_config["Model"]["Precision"]
+            if isinstance(default, dict):
+                default = default.get("default", "fixed<16,6>")
+            prec = default
+
+        m = re.search(r"<\s*(\d+)\s*,\s*(\d+)", prec)
+        if not m:
+            raise ValueError(f"Cannot parse output precision: {prec!r}")
+        return int(m.group(1)), int(m.group(2))
 
     @staticmethod
     def write_io_parallel(tb_path, *, dut_name, clk_period, in_width_total,
@@ -161,10 +236,17 @@ class TestbenchWriter:
     @staticmethod
     def write_io_stream(tb_path, *, dut_name, clk_period, n_samples,
                         beats_per_sample, ports,
+                        out_beats_per_sample=None,
                         timeout_cycles=DEFAULT_TIMEOUT_IO_STREAM):
         template = (TEMPLATE_DIR / "power_tb_io_stream.v.tpl").read_text()
         reset_port = ports["reset_port"]
         reset_active, reset_inactive = TestbenchWriter._reset_polarity(reset_port)
+
+        if out_beats_per_sample is None:
+            # Legacy fallback — almost always wrong for conv/classifier models
+            # where input and output shapes differ. Callers should pass an
+            # explicit value computed from the output layer shape.
+            out_beats_per_sample = beats_per_sample
 
         body = template.format(
             dut_name=dut_name,
@@ -173,6 +255,7 @@ class TestbenchWriter:
             out_tdata_width=ports["output_stream"]["tdata_width"],
             n_samples=n_samples,
             beats_per_sample=beats_per_sample,
+            out_beats_per_sample=out_beats_per_sample,
             in_port=ports["input_stream"]["name"],
             out_port=ports["output_stream"]["name"],
             reset_port=reset_port,
@@ -330,8 +413,16 @@ class TestbenchWriter:
         ports = PortParser.parse(myproject_v)
         tb_path = project_dir / "power_tb.v"
 
+        if io_type == "io_stream":
+            out_W, _ = TestbenchWriter.output_precision_WI(stripped_model, hls_config)
+            out_beats = TestbenchWriter.output_beats_per_sample(stripped_model, ports, out_W)
+        else:
+            out_W, out_beats = None, 1
+
         timeout_cycles = TestbenchWriter.estimate_timeout_cycles(
             stripped_model, hls_config, n_samples, io_type,
+            in_beats_per_sample=beats_per_sample,
+            out_beats_per_sample=(out_beats if io_type == "io_stream" else 1),
         )
         ctx.log.info(f"TB timeout_cycles={timeout_cycles}")
 
@@ -351,12 +442,17 @@ class TestbenchWriter:
                 timeout_cycles=timeout_cycles,
             )
         else:
+            ctx.log.info(
+                f"out_W={out_W} out_beats_per_sample={out_beats} "
+                f"in_beats_per_sample={beats_per_sample}"
+            )
             TestbenchWriter.write_io_stream(
                 tb_path,
                 dut_name="myproject",
                 clk_period=clk_period,
                 n_samples=n_samples,
                 beats_per_sample=beats_per_sample,
+                out_beats_per_sample=out_beats,
                 ports=ports,
                 timeout_cycles=timeout_cycles,
             )

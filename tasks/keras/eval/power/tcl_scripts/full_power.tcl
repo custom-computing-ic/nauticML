@@ -7,7 +7,9 @@
 # class of bugs in long-lived Vivado sessions and keeps peak memory per
 # process tight enough for an 8GB machine.
 #
-set_param general.maxThreads 4
+# NOTE: maxThreads here is for the orchestrator process only and has no
+# effect on child Vivado processes. Each stage_*.tcl sets its own.
+# Leaving the line out intentionally.
 catch { config_webtalk -user off }
 
 if { $argc != 6 } {
@@ -49,18 +51,30 @@ if {![file exists $glbl_v]} {
     exit 1
 }
 
-# Helper: run a child Vivado in a fresh process, fail loudly on crash
-proc run_child_vivado {tag tcl_path args_list} {
+# Helper: run a child Vivado in a fresh process.
+# timeout_sec=0 means no timeout. Otherwise wraps in GNU timeout(1) which
+# sends TERM at the deadline and KILL 30s later if the child ignores it.
+proc run_child_vivado {tag tcl_path args_list {timeout_sec 0}} {
     global output_dir
     set log_file "$output_dir/child_${tag}.log"
-    set cmd [list vivado -mode batch -nojournal -nolog -source $tcl_path -tclargs {*}$args_list]
-    puts "    spawning: vivado -mode batch -source [file tail $tcl_path]"
+    set base [list vivado -mode batch -nojournal -nolog \
+                   -source $tcl_path -tclargs {*}$args_list]
+    if {$timeout_sec > 0} {
+        set cmd [list timeout --kill-after=30s ${timeout_sec}s {*}$base]
+        puts "    spawning: vivado -mode batch -source [file tail $tcl_path]  (timeout ${timeout_sec}s)"
+    } else {
+        set cmd $base
+        puts "    spawning: vivado -mode batch -source [file tail $tcl_path]"
+    }
     puts "    log:      $log_file"
-    set rc [catch {
-        exec sh -c "[join $cmd { }] > $log_file 2>&1"
-    } msg]
+    set rc [catch { exec {*}$cmd >& $log_file } msg]
     if {$rc != 0} {
-        puts "    ERROR: child '$tag' failed (rc=$rc); tail of $log_file:"
+        # timeout(1): 124 = TERM at deadline, 137 = KILL after grace
+        if {$rc == 124 || $rc == 137} {
+            puts "    ERROR: child '$tag' TIMED OUT (rc=$rc); tail of $log_file:"
+        } else {
+            puts "    ERROR: child '$tag' failed (rc=$rc); tail of $log_file:"
+        }
         catch {exec tail -n 60 $log_file} tail
         puts $tail
         return 0
@@ -69,15 +83,27 @@ proc run_child_vivado {tag tcl_path args_list} {
 }
 
 # ================================================================
-# STAGE 1: Synthesis (OOC) -> post_synth.dcp + funcsim netlist
+# STAGE 1: Synthesis (OOC) -> post_synth.dcp
 # ================================================================
 puts "\n>>> STAGE 1: synthesis (child process)"
 if {![run_child_vivado "synth" "$script_dir/stage_synth.tcl" \
-        [list $verilog_dir $output_dir $fpga_part $top_module $clock_period]]} {
+        [list $verilog_dir $output_dir $fpga_part $top_module $clock_period] \
+        7200]} {
     puts "FATAL: synthesis stage failed"
     exit 1
 }
 
+# ================================================================
+# STAGE 1b: funcsim netlist export from post_synth.dcp
+# Separated so that if write_verilog hangs/OOMs we don't lose the dcp.
+# ================================================================
+puts "\n>>> STAGE 1b: write funcsim netlist (child process)"
+if {![run_child_vivado "funcsim" "$script_dir/stage_funcsim.tcl" \
+        [list $output_dir] \
+        3600]} {
+    puts "FATAL: funcsim netlist export failed"
+    exit 1
+}
 
 # ================================================================
 # STAGE 2: xsim functional + timing -> SAIFs
@@ -90,7 +116,7 @@ proc run_xsim_stage {stage_dir netlist_v tb_file glbl_v sdf_arg saif_path saif_s
     set run_tcl "$stage_dir/run.tcl"
     set fh [open $run_tcl w]
     puts $fh "open_saif \"$saif_path\""
-    puts $fh "log_saif \[get_objects -r $saif_scope/* \]"
+    puts $fh "log_saif \[get_objects -r ${saif_scope}/*\]"
     puts $fh "run all"
     puts $fh "close_saif"
     puts $fh "quit"
@@ -112,10 +138,15 @@ proc run_xsim_stage {stage_dir netlist_v tb_file glbl_v sdf_arg saif_path saif_s
     }
 
     puts "    xelab (elaborating)..."
-    set xelab_flags "-L simprims_ver -L secureip -L unisims_ver --debug typical --relax -s $snapshot"
     if {$sdf_arg ne ""} {
-        set xelab_flags "$xelab_flags --transport_int_delays --pulse_r 100 --pulse_int_r 100 --pulse_e 100 --pulse_int_e 100 $sdf_arg"
+        # Timing sim (post-impl, with SDF): use simprims_ver
+        set xelab_flags "-L simprims_ver -L secureip --debug typical --relax --transport_int_delays --pulse_r 100 --pulse_int_r 100 --pulse_e 100 --pulse_int_e 100 $sdf_arg -s $snapshot"
+    } else {
+        # Functional sim (post-synth, no SDF): use unisims_ver + unimacro_ver
+        # --debug typical is REQUIRED for SAIF logging
+        set xelab_flags "-L unisims_ver -L unimacro_ver -L secureip --debug typical --relax -s $snapshot"
     }
+
     set xelab_cmd "cd $stage_dir && xelab $xelab_flags xil_defaultlib.power_tb xil_defaultlib.glbl"
     set rc [catch { exec sh -c "$xelab_cmd > $xelab_log 2>&1" } msg]
     if {$rc != 0} {
@@ -157,20 +188,23 @@ set orig_pwd [pwd]
 # ================================================================
 puts "\n>>> STAGE 2: post-synth functional sim + SAIF"
 set synth_sim_dir "$output_dir/sim_synth"
-run_xsim_stage \
-    $synth_sim_dir \
-    "$output_dir/post_synth_funcsim.v" \
-    $tb_file \
-    $glbl_v \
-    "" \
-    $saif_synth \
-    $saif_scope \
-    $vectors_file
+if {![run_xsim_stage \
+        $synth_sim_dir \
+        "$output_dir/post_synth_funcsim.v" \
+        $tb_file \
+        $glbl_v \
+        "" \
+        $saif_synth \
+        $saif_scope \
+        $vectors_file]} {
+    cd $orig_pwd
+    puts "FATAL: post-synth xsim stage failed"
+    exit 1
+}
 cd $orig_pwd
 
-
 # ================================================================
-# STAGE 3: Sanity check impl captures + SAIF header
+# STAGE 3: Sanity check captures + SAIF header
 # ================================================================
 puts "\n>>> STAGE 3: sanity check"
 
