@@ -29,7 +29,9 @@ class KerasEnergy:
         #     keras.layers.Activation('softmax', name='fc2_softmax'),
         # ])
 
-        project_dir = tempfile.mkdtemp(prefix="hls4ml_power_")
+        # project_dir = tempfile.mkdtemp(prefix="hls4ml_power_")
+        project_dir = "/mnt/ccnas2/bdp/gt922/tmp/nauticml_projects"
+        Path(project_dir).mkdir(parents=True, exist_ok=True)
 
         hls_dir = os.path.join(project_dir, "nauticml_pe_prj")
         ctx.hls4ml.hls_project_dir = hls_dir

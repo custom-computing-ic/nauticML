@@ -100,12 +100,24 @@ class HLSBuilder:
             stripped_model, granularity="name"
         )
 
+        # Flat ReuseFactor across all Dense/Conv layers — pinned via config so
+        # max(RF) stays constant between DSE iterations (architecture varies
+        # but RF doesn't, which keeps the power/RF axis controllable).
+        target_rf = ctx.hls4ml.hls_config.reuse_factor
+
         for layer in stripped_model.layers:
             if layer.name not in hls_config["LayerName"]:
                 continue
 
-            rf = HLSBuilder.get_min_rf(layer, ctx.hls4ml.hls_config.fpga_part)
-            hls_config["LayerName"][layer.name]["ReuseFactor"] = rf
+            min_rf = HLSBuilder.get_min_rf(layer, ctx.hls4ml.hls_config.fpga_part)
+            if target_rf < min_rf:
+                raise RuntimeError(
+                    f"Configured reuse_factor={target_rf} is below layer "
+                    f"{layer.name!r}'s required minimum {min_rf} "
+                    f"(io_stream Conv needs RF >= kh*kw*n_chan). "
+                    f"Raise hls_config.reuse_factor in the config."
+                )
+            hls_config["LayerName"][layer.name]["ReuseFactor"] = target_rf
 
             # Pin accumulator/result precision so hls4ml doesn't auto-widen.
             layer_cfg = hls_config["LayerName"][layer.name]
