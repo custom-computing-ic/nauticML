@@ -143,9 +143,10 @@ proc run_xsim_stage {stage_dir netlist_v tb_file glbl_v sdf_arg saif_path saif_s
         set xelab_flags "-L simprims_ver -L secureip --debug typical --relax --transport_int_delays --pulse_r 100 --pulse_int_r 100 --pulse_e 100 --pulse_int_e 100 $sdf_arg -s $snapshot"
     } else {
         # Functional sim (post-synth, no SDF): use unisims_ver + unimacro_ver
-        # --debug typical is REQUIRED for SAIF logging
-        set xelab_flags "-L unisims_ver -L unimacro_ver -L secureip --debug typical -O3 --mt auto --relax -s $snapshot"
-        # set xelab_flags "-L unisims_ver -L unimacro_ver -L secureip --debug typical --relax -s $snapshot"
+        # --debug typical is REQUIRED for SAIF logging. Do NOT add -O3 / --mt
+        # auto: aggressive xelab optimization can fold the hierarchy needed
+        # by log_saif [get_objects -r ...] and silently break SAIF coverage.
+        set xelab_flags "-L unisims_ver -L unimacro_ver -L secureip --debug typical --relax -s $snapshot"
     }
 
     set xelab_cmd "cd $stage_dir && xelab $xelab_flags xil_defaultlib.power_tb xil_defaultlib.glbl"

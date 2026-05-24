@@ -50,21 +50,16 @@ class TestbenchWriter:
         return ""
 
     @staticmethod
-    def estimate_timeout_cycles(qmodel, hls_config, n_samples, io_type,
-                                safety=2, floor=200_000,
-                                in_beats_per_sample=1,
-                                out_beats_per_sample=1):
+    def max_layer_ii(qmodel, hls_config):
         """
-        Conservative cycle budget for the power TB based on max layer II.
-
-        Streaming Resource strategy II model:
-          Dense: II_per_sample ≈ ReuseFactor (one inference per RF cycles)
-          Conv:  II_per_sample ≈ output_positions × ReuseFactor
-                 (Resource serialises MACs within an output position; output
-                  positions are processed sequentially when
-                  ParallelizationFactor is 1, which it is in our flow.)
-
-        Total TB budget = max_layer_II × n_samples × safety + pipeline fill.
+        Worst-case per-sample initiation interval across compute layers, in
+        clock cycles. For streaming Resource strategy:
+          Dense: II ≈ ReuseFactor (one inference per RF cycles).
+          Conv:  II ≈ output_positions × ReuseFactor (Resource serialises
+                 MACs within an output position; positions are processed
+                 sequentially when ParallelizationFactor=1).
+        The pipeline's per-sample throughput is bounded by the slowest layer,
+        so `max(II)` is a reasonable proxy for inference time in cycles.
         """
         DENSE  = ("Dense",  "QDense")
         CONV1D = ("Conv1D", "QConv1D")
@@ -105,6 +100,26 @@ class TestbenchWriter:
                 ii = _output_positions(_flat_shape(layer.output_shape)) * rf
             if ii > max_ii:
                 max_ii = ii
+        return max_ii
+
+    @staticmethod
+    def estimate_timeout_cycles(qmodel, hls_config, n_samples, io_type,
+                                safety=2, floor=200_000,
+                                in_beats_per_sample=1,
+                                out_beats_per_sample=1):
+        """
+        Conservative cycle budget for the power TB based on max layer II.
+
+        Streaming Resource strategy II model:
+          Dense: II_per_sample ≈ ReuseFactor (one inference per RF cycles)
+          Conv:  II_per_sample ≈ output_positions × ReuseFactor
+                 (Resource serialises MACs within an output position; output
+                  positions are processed sequentially when
+                  ParallelizationFactor is 1, which it is in our flow.)
+
+        Total TB budget = max_layer_II × n_samples × safety + pipeline fill.
+        """
+        max_ii = TestbenchWriter.max_layer_ii(qmodel, hls_config)
 
         fill = 50_000 if io_type == "io_stream" else 10_000
 

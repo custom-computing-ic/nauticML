@@ -19,6 +19,11 @@ class HLSBuilder:
         #    original implementation but with safety passes from the SAIF code).
         hls_config, stripped_model = HLSBuilder.convert_from_nauticml(ctx, model)
 
+        # Stash max-layer II on ctx so power_eval can compute energy =
+        # power × inference_time without re-deriving the stripped model.
+        ctx.hls4ml.max_ii = TestbenchWriter.max_layer_ii(stripped_model, hls_config)
+        ctx.log.info(f"max_layer_ii={ctx.hls4ml.max_ii} cycles")
+
         # 2. Pick io_type once; downstream TB writing branches on it.
         io_type = ctx.hls4ml.hls_config.io_type or "io_parallel"
         
@@ -100,12 +105,14 @@ class HLSBuilder:
             stripped_model, granularity="name"
         )
 
-        # Compute each layer's natural min RF (existing per-layer logic), then
-        # pin only the worst layer(s) — those whose natural min_rf equals the
-        # max across the model — to the configured target. max(RF) stays
-        # constant between DSE iterations (the bound is the config value, not
-        # the architecture); smaller layers keep their natural RF and stay
-        # efficient.
+        # Compute each layer's natural min RF (existing per-layer logic). For
+        # the worst layer(s), pin to the closest valid RF to the configured
+        # target — "valid" means a divisor of total weights >= natural_rf,
+        # which is what hls4ml's io_stream Resource strategy will accept.
+        # Smaller layers keep their natural RF and stay efficient.
+        # max(RF) will be near the config target (not exactly) but won't
+        # cause hls4ml synthesis errors at architectures where the target
+        # doesn't happen to be a valid divisor.
         target_rf = ctx.hls4ml.hls_config.reuse_factor
         fpga_part = ctx.hls4ml.hls_config.fpga_part
 
@@ -114,15 +121,15 @@ class HLSBuilder:
             for layer in stripped_model.layers
             if layer.name in hls_config["LayerName"]
         }
-        
+
         worst_rf = max(natural_rfs.values()) if natural_rfs else 0
         if worst_rf > target_rf:
             worst_layer = max(natural_rfs, key=natural_rfs.get)
-            raise RuntimeError(
+            ctx.log.warning(
                 f"Configured reuse_factor={target_rf} is below worst-layer "
-                f"natural min RF: {worst_layer!r} requires {worst_rf} "
-                f"(io_stream Conv needs RF >= kh*kw*n_chan). "
-                f"Raise hls_config.reuse_factor in the config."
+                f"natural min RF: {worst_layer!r} requires {worst_rf}. "
+                f"Using natural minimum; max(RF) for this iteration will "
+                f"be {worst_rf}, not {target_rf}."
             )
 
         for layer in stripped_model.layers:
@@ -130,7 +137,15 @@ class HLSBuilder:
                 continue
 
             natural_rf = natural_rfs[layer.name]
-            rf = target_rf if natural_rf == worst_rf else natural_rf
+            if natural_rf == worst_rf:
+                rf = HLSBuilder._closest_valid_rf(layer, target_rf, natural_rf)
+                if rf != target_rf:
+                    ctx.log.info(
+                        f"Pinned {layer.name!r} RF={rf} (target={target_rf}, "
+                        f"natural={natural_rf}, closest valid divisor)"
+                    )
+            else:
+                rf = natural_rf
             hls_config["LayerName"][layer.name]["ReuseFactor"] = rf
 
             # Pin accumulator/result precision so hls4ml doesn't auto-widen.
@@ -207,6 +222,31 @@ class HLSBuilder:
             new_layer.set_weights(layer.get_weights())
 
         return clean
+
+    @staticmethod
+    def _closest_valid_rf(layer, target_rf, natural_rf):
+        """
+        Closest RF to target_rf that hls4ml's io_stream Resource strategy
+        accepts. Valid RFs are divisors of `total_weights` >= natural_rf
+        (the per-layer minimum already accounts for kh*kw*n_chan on Conv).
+        Falls back to natural_rf if no divisor exists in that range.
+        """
+        weights = layer.get_weights()
+        if not weights:
+            return target_rf
+        total = int(np.prod(weights[0].shape))
+
+        # Divisors via sqrt enumeration — O(√n), tractable for ~4M weights.
+        divisors = set()
+        sqrt_n = int(total ** 0.5)
+        for i in range(1, sqrt_n + 1):
+            if total % i == 0:
+                divisors.add(i)
+                divisors.add(total // i)
+        valid = sorted(d for d in divisors if d >= natural_rf)
+        if not valid:
+            return natural_rf
+        return min(valid, key=lambda x: abs(x - target_rf))
 
     @staticmethod
     def get_min_rf(layer, fpga_part):
