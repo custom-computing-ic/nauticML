@@ -4,6 +4,7 @@ from nautic import taskx
 
 import shutil
 import tempfile
+from datetime import datetime
 
 from tasks.keras.eval.power.hls_builder import HLSBuilder
 from tasks.keras.eval.power.tb_writer import TestbenchWriter
@@ -30,7 +31,12 @@ class KerasEnergy:
         # ])
 
         # project_dir = tempfile.mkdtemp(prefix="hls4ml_power_")
-        project_dir = "/mnt/ccnas2/bdp/gt922/tmp/nauticml_projects"
+        project_root = "/mnt/ccnas2/bdp/gt922/tmp/nauticml_projects"
+
+        # Create timestamp like: 20260524_143015
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        project_dir = os.path.join(project_root, f"nauticml_pe_prj_{timestamp}")
         Path(project_dir).mkdir(parents=True, exist_ok=True)
 
         hls_dir = os.path.join(project_dir, "nauticml_pe_prj")
@@ -50,7 +56,8 @@ class KerasEnergy:
                 raise ValueError(f"dynamic power and resources not parsed from power estimation at {hls_dir}")
 
             # We only focus on dynamic power, as it's mostly what changes between designs 
-            ctx.eval.energy = dyn_power
+            # should be * ctx.hls4ml.num_mc_samples.get() - to test
+            ctx.eval.energy = dyn_power 
             # TODO: create artifact for the resources used
 
         except Exception as e:

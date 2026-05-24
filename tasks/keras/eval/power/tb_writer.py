@@ -17,7 +17,7 @@ DEFAULT_TIMEOUT_IO_STREAM   = 10_000_000
 
 # Default SAIF sample count. Matches the value used in the sweep code; tune
 # via ctx.hls4ml.power_mode.num_samples if vectorless mode is on.
-N_SAIF_SAMPLES_DEFAULT = 64
+N_SAIF_SAMPLES_DEFAULT = 8
 
 # Default TB clock period in ns. Falls back to ctx.hls4ml.hls_config.clock_period
 # when present; this constant exists only so the TB writer never sees None.

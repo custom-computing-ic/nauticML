@@ -1,6 +1,9 @@
 pydantic
 # git+https://github.com/hmarkc/hls4ml@8db496e63e03fd1c9f7c88ca262015257d739adf#egg=hls4ml
-hls4ml==1.1.0
+# hls4ml==1.1.0
+
+# this version pins hls4ml 1.1.0 and BayesianDropout from hmarkc's
+git+https://github.com/bobbomania/hls4ml.git@0b76383f101285bf588af963cee6fa37099ea6ef#egg=hls4ml
 pyyaml
 bayesian-optimization
 qkeras
