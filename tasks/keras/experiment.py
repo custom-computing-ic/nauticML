@@ -62,14 +62,25 @@ class KerasExperiment:
                 log.warning("⚠️ CPU used by default as no CPU or GPU indices provided are empty")
                 return configure_gpus(True, [])
 
-        save_dir = ctx.experiment.save_dir
+        # Per-process save_dir so concurrent run.py instances don't wipe
+        # each other's checkpoints. The base path from config gets a
+        # timestamp + PID suffix; timestamp alone can collide if two runs
+        # start in the same second, PID makes it unique.
+        from datetime import datetime
+        base_save_dir = ctx.experiment.save_dir
+        run_tag = f"{datetime.now().strftime('%Y%m%d_%H%M%S')}_pid{os.getpid()}"
+        save_dir = f"{base_save_dir}_{run_tag}"
 
         if os.path.exists(save_dir):
             shutil.rmtree(save_dir)
-
         os.makedirs(save_dir)
-        ctx.experiment.save_dir = os.path.abspath(save_dir)
-        ctx.experiment.ckpt_file = os.path.join(save_dir, ctx.experiment.ckpt_file)
+
+        save_dir_abs = os.path.abspath(save_dir)
+        ctx.experiment.save_dir = save_dir_abs
+        # Use the absolute save_dir for the join — previously this combined the
+        # still-relative local `save_dir` with the relative ckpt_file, producing
+        # a path that only resolves correctly while CWD is stable.
+        ctx.experiment.ckpt_file = os.path.join(save_dir_abs, ctx.experiment.ckpt_file)
 
         seed = ctx.experiment.seed
 
