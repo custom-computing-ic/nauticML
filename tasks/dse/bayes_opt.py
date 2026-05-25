@@ -112,10 +112,14 @@ class BayesOpt:
         for metric in bo.metrics.model_fields:
             metric_value = getattr(bo.metrics, metric).get()
 
-            # If we cannot properly evaluate, we cannot judge the model
+            # If we cannot evaluate this metric, flag the run as penalised but
+            # keep iterating so every metric is recorded (as None where missing).
+            # The score gets overridden to SCORE_PENALTY below; preserving the
+            # per-metric breakdown is what lets us tell *which* metric died.
             if metric_value is None:
                 is_penalised = True
-                break
+                metric_values[metric] = None
+                continue
 
             metric_values[metric] = round(metric_value, 4)
 

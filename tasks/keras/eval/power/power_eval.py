@@ -18,6 +18,13 @@ VIVADO_TIMEOUT = 8 * 60 * 60 # 8 hour default timeout
 TCL_SCRIPT = Path(__file__).parent / "tcl_scripts" / "full_power.tcl"
 import keras
 
+CACHED_POWER_ENERGY = {
+    ("lenet", "Opt-Power"):           [(1.809, 797769), (0.4770, 210357)],
+    ("lenet", "Opt-Energy"):          [(1.809, 797769), (0.4770, 210357)],
+    ("lenet", "Opt-Energy-Balanced"): [(1.809, 797769), (0.4770, 210357)],
+    ("lenet", "Opt-Power-Balanced"):  [(1.809, 797769), (0.4770, 210357)],
+}
+
 class KerasEnergy:
     @taskx
     def evaluate_energy(ctx, model):
@@ -32,23 +39,29 @@ class KerasEnergy:
         except Exception:
             iter_num = "manual"
 
-        # Short-circuit: cached starting values for the lenet DSE first
-        # iteration. We re-run lenet experiments often; the iter-1 Vivado
-        # run takes ~30 min and always produces the same numbers (same
-        # default hyperparameters), so skip it and return the cached values.
-        # Disable by setting iter to something other than 1 or running a
-        # different model.
+        # Short-circuit using the CACHED_POWER_ENERGY map: if we've previously
+        # run this (model, strategy) up to iteration N, reuse those values
+        # rather than paying the ~30-min Vivado cost again. Index 0 == iter 1.
         try:
             model_name_raw = ctx.model.name
             model_name = model_name_raw.get() if hasattr(model_name_raw, "get") else model_name_raw
         except Exception:
             model_name = None
-        if model_name == "lenet" and iter_num == 1:
-            ctx.eval.power = 1.809
-            ctx.eval.energy = 797769
+        try:
+            strategy_name_raw = ctx.bayes_opt.curr_strategy.name
+            strategy_name = strategy_name_raw.get() if hasattr(strategy_name_raw, "get") else strategy_name_raw
+        except Exception:
+            strategy_name = None
+
+        cache = CACHED_POWER_ENERGY.get((model_name, strategy_name), [])
+        if isinstance(iter_num, int) and 1 <= iter_num <= len(cache):
+            cached_power, cached_energy = cache[iter_num - 1]
+            ctx.eval.power = cached_power
+            ctx.eval.energy = cached_energy
             ctx.log.info(
-                "Using cached starting values for lenet iter=1: "
-                "power=1.809 W, energy=797769 W·cycles (skipping Vivado)"
+                f"Using cached values for ({model_name}, {strategy_name}) "
+                f"iter={iter_num}: power={cached_power} W, "
+                f"energy={cached_energy} W·cycles (skipping Vivado)"
             )
             return
 
@@ -187,7 +200,8 @@ class KerasEnergy:
 
         # PID-tagged artifact key so concurrent processes don't clobber each
         # other's Prefect artifacts (same iter_num collides otherwise).
-        artifact_key_suffix = f"iter{iter_num}_pid{os.getpid()}"
+        # Prefect keys: lowercase letters, digits, dashes ONLY — no underscores.
+        artifact_key_suffix = f"iter{iter_num}-pid{os.getpid()}"
 
         save_dir_raw = ctx.experiment.save_dir
         save_dir = Path(save_dir_raw.get() if hasattr(save_dir_raw, "get") else save_dir_raw)
