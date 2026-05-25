@@ -1,3 +1,6 @@
+import os
+import shutil
+
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_callbacks
@@ -27,6 +30,15 @@ class KerasTrain:
                 progress = (epoch / nepoch) * 100
                 log.artifact(progress_id=pg_id,
                                 progress=progress)
+
+        # Remove stale checkpoint from a previous DSE iteration whose
+        # architecture (scale_factor, num_bayes_layer) may differ.
+        ckpt = ctx.experiment.ckpt_file
+        if os.path.exists(ckpt):
+            if os.path.isdir(ckpt):
+                shutil.rmtree(ckpt)
+            else:
+                os.remove(ckpt)
 
         if ctx.model.name == "lenet":
             chkp = ModelCheckpoint(
