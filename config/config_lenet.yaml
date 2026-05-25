@@ -42,10 +42,10 @@ S7:
     base: 5340192
   power:
     weight: -1.00
-    base: 1.0
+    base: 1.80
   energy:
     weight: 0.00
-    base: 500000
+    base: 800000
 
   top_n: 1
   name: Opt-Power
@@ -66,13 +66,13 @@ S8:
     base: 5340192
   power:
     weight: 0.00
-    base: 1.0
+    base: 1.80
   # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
   # Proportional to joules at fixed clock_period. Base ~500k is the order
   # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
   energy:
     weight: -1.00
-    base: 500000
+    base: 800000
 
   top_n: 1
   name: Opt-Energy
@@ -93,10 +93,10 @@ S1:
     base: 5340192
   power:
     weight: 0.00
-    base: 1.0
+    base: 1.80
   energy:
     weight: 0.00
-    base: 500000
+    base: 800000
 
   top_n: 1
   name: Opt-Efficiency
@@ -118,10 +118,10 @@ S2:
     min: 400000
   power:
     weight: 0.00
-    base: 1.0
+    base: 1.80
   energy:
     weight: 0.00
-    base: 500000
+    base: 800000
 
   top_n: 1
   name: Opt-Accuracy
@@ -144,10 +144,10 @@ S3:
     min: 400000
   power:
     weight: 0.00
-    base: 1.0
+    base: 1.80
   energy:
     weight: 0.00
-    base: 500000
+    base: 800000
 
   top_n: 1
   name: Opt-Confidence
@@ -167,10 +167,10 @@ S4:
     base: 5340192
   power:
     weight: 0.00
-    base: 1.0
+    base: 1.80
   energy:
     weight: 0.00
-    base: 500000
+    base: 800000
 
   top_n: 1
   name: Opt-Confidence-Accuracy
@@ -190,10 +190,10 @@ S5:
     base: 5340192
   power:
     weight: 0.00
-    base: 1.0
+    base: 1.80
   energy:
     weight: 0.00
-    base: 500000
+    base: 800000
 
   top_n: 1
   name: Opt-Confidence-Efficiency
@@ -213,10 +213,10 @@ S6:
     base: 5340192
   power:
     weight: 0.00
-    base: 1.0
+    base: 1.80
   energy:
     weight: -0.25
-    base: 500000
+    base: 800000
 
   top_n: 3
   name: Opt-Balanced
