@@ -62,7 +62,8 @@ class KerasTrain:
                 validation_split=ctx.train.validation_split,
                 callbacks=callbacks)
 
-            log.artifact(table=train_stat.history,
+            history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
+            log.artifact(table=history,
                          key=f"train-results-{ctx.train.id.get()}",
                          description="Training results")
 
@@ -106,12 +107,13 @@ class KerasTrain:
             nepoch = ctx.train.num_epoch - 1
             callbacks.append(ProgressCallback())
 
-            train_stat = model.fit_generator(generator=train_gen,
+            train_stat = model.fit(train_gen,
                 epochs=ctx.train.num_epoch,
                 callbacks=callbacks,
                 validation_data=(dataset['x_val'], dataset['y_val']),
                 )
 
-            log.artifact(table=train_stat.history,
+            history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
+            log.artifact(table=history,
                          key=f"train-results-{ctx.train.id.get()}",
                          description="Training results")
