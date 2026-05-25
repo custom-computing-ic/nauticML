@@ -21,7 +21,7 @@ def conv2d_bn(x, filters, kernel_size, weight_decay=.0, strides=(1, 1)):
     return layer
 
 def Insert_Bayesian_Layer(cfg, x):
-  if cfg.model.dropout_type == "mc": x = BayesianDropout(cfg.model.dropout_rate)(x)
+  if cfg.model.dropout_type == "mc": x = BayesianDropout(cfg.model.dropout_rate,  seed=cfg.experiment.seed)(x)
   else: raise NotImplementedError("dropout type is not supportred")
   return x
 
