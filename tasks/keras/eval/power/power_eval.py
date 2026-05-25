@@ -52,12 +52,15 @@ class KerasEnergy:
             )
             return
 
-        # Each BO iteration gets its own iter+timestamp project_dir to avoid
-        # collisions between concurrent runs and stale-snapshot reuse by xsim.
+        # Each BO iteration gets its own iter+timestamp+pid project_dir to
+        # avoid collisions between concurrent runs (two processes reaching
+        # iter=1 in the same second would otherwise share dirs and clobber
+        # each other's Vivado state) and stale-snapshot reuse by xsim.
         project_root = "/mnt/ccnas2/bdp/gt922/tmp/nauticml_projects"
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         project_dir = os.path.join(
-            project_root, f"nauticml_pe_prj_iter{iter_num}_{timestamp}"
+            project_root,
+            f"nauticml_pe_prj_iter{iter_num}_{timestamp}_pid{os.getpid()}",
         )
         Path(project_dir).mkdir(parents=True, exist_ok=True)
 
@@ -182,6 +185,10 @@ class KerasEnergy:
         except Exception:
             iter_num = "manual"
 
+        # PID-tagged artifact key so concurrent processes don't clobber each
+        # other's Prefect artifacts (same iter_num collides otherwise).
+        artifact_key_suffix = f"iter{iter_num}_pid{os.getpid()}"
+
         save_dir_raw = ctx.experiment.save_dir
         save_dir = Path(save_dir_raw.get() if hasattr(save_dir_raw, "get") else save_dir_raw)
         artifact_dir = save_dir / "power_artifacts" / f"iter_{iter_num}"
@@ -202,7 +209,7 @@ class KerasEnergy:
                 shutil.copy(src, artifact_dir / fname)
 
         ctx.log.artifact(
-            key=f"power-iter-{iter_num}",
+            key=f"power-{artifact_key_suffix}",
             table=[
                 {"metric": "dynamic_w",        "value": dyn_power},
                 {"metric": "max_ii_cycles",    "value": max_ii},
@@ -211,12 +218,12 @@ class KerasEnergy:
         )
         if resources:
             ctx.log.artifact(
-                key=f"resources-iter-{iter_num}",
+                key=f"resources-{artifact_key_suffix}",
                 table=[{"resource": k, "count": v} for k, v in resources.items()],
             )
         if timing:
             ctx.log.artifact(
-                key=f"timing-iter-{iter_num}",
+                key=f"timing-{artifact_key_suffix}",
                 table=[{"metric": k, "ns": v} for k, v in timing.items()],
             )
 

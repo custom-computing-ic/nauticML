@@ -73,7 +73,7 @@ class KerasExperiment:
 
         if os.path.exists(save_dir):
             shutil.rmtree(save_dir)
-        os.makedirs(save_dir)
+        os.makedirs(save_dir, exist_ok=True)
 
         save_dir_abs = os.path.abspath(save_dir)
         ctx.experiment.save_dir = save_dir_abs
