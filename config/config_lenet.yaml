@@ -47,7 +47,7 @@ S7:
     weight: 0.00
     base: 800000
 
-  top_n: 1
+  top_n: 3
   name: Opt-Power
 
 S8:
@@ -74,8 +74,65 @@ S8:
     weight: -1.00
     base: 800000
 
-  top_n: 1
+  top_n: 3
   name: Opt-Energy
+
+
+S10:
+  accuracy:
+    weight: 0.20
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: -0.20
+    base: 0.03
+  ape:
+    weight: 0.20
+    base: 1.5
+  flops:
+    weight: -0.20
+    base: 5340192
+  power:
+    weight: 0.00
+    base: 1.80
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: -0.20
+    base: 800000
+
+  top_n: 3
+  name: Opt-Energy-Balanced
+
+
+S9:
+  accuracy:
+    weight: 0.20
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: -0.20
+    base: 0.03
+  ape:
+    weight: 0.20
+    base: 1.5
+  flops:
+    weight: -0.20
+    base: 5340192
+  power:
+    weight: -0.20
+    base: 1.80
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Power-Balanced
+
 
 S1:
   accuracy:
@@ -200,29 +257,29 @@ S5:
 
 S6:
   accuracy:
-    weight: 0.25
+    weight: 0.166
     base: 0.99
   ece:
-    weight: -0.25
+    weight: -0.166
     base: 0.03
   ape:
-    weight: 0.25
+    weight: 0.166
     base: 1.5
   flops:
-    weight: -0.25
+    weight: -0.166
     base: 5340192
   power:
-    weight: 0.00
+    weight: -0.166
     base: 1.80
   energy:
-    weight: -0.25
+    weight: -0.166
     base: 800000
 
   top_n: 3
   name: Opt-Balanced
 
 strategy:
-  strategies: [ S7, S8 ]
+  strategies: [ S7 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -307,7 +364,7 @@ hls4ml:
     strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
     io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
     clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
-    fpga_part: "xcku115-flvb2104-2-i" # Kintex UltraScale KU115 (HEART 2025 Table 5)
+    fpga_part: "xczu7ev-ffvc1156-2-e" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
     # Pinned flat across all Dense/Conv layers so max(RF) stays constant
     # across DSE iterations (architecture varies but RF doesn't). Must be
     # >= every layer's min: at scale_factor=0.95, conv2d_2 needs >= 5*5*19=475
