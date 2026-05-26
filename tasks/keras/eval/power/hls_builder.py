@@ -183,43 +183,64 @@ class HLSBuilder:
     def strip_for_hls(model):
         """
         Unwrap MCD wrapper, strip pruning wrappers, and rebuild as a clean
-        Sequential. BayesianDropout layers are kept so they are synthesised
+        model. BayesianDropout layers are kept so they are synthesised
         into hardware by the forked hls4ml.
+
+        Sequential models are rebuilt as Sequential; functional models
+        (e.g. ResNet with skip connections) are cloned via the functional API
+        so merge layers like Add receive the correct list of inputs.
         """
         from tensorflow_model_optimization.sparsity.keras import strip_pruning
         from logic.converter.keras.dropout.inference_layer import BayesianDropout
 
-        # 1. Extract the inner model if wrapped (e.g., MonteCarloDropoutModel).
         source = model
         if hasattr(source, "model") and isinstance(source.model, tf.keras.Model):
             source = source.model
 
         source = strip_pruning(source)
 
-        # 2. Topology guardrail: Sequential rebuild only works for linear models.
         if len(source.outputs) != 1:
             raise RuntimeError(
                 f"strip_for_hls expects a single-output model, got {len(source.outputs)}"
             )
 
-        # 3. Rebuild as a clean Sequential backbone, keeping BayesianDropout
-        #    layers so they are synthesised into hardware by the forked hls4ml.
-        clean = tf.keras.models.Sequential()
-        input_shape = source.input_shape[1:]  # exclude batch dim
+        is_sequential = isinstance(source, tf.keras.Sequential)
 
-        for layer in source.layers:
-            # Strip standard Keras Dropout (not used for Bayesian inference)
-            # but keep BayesianDropout — hls4ml has a registered handler for it.
-            if isinstance(layer, tf.keras.layers.Dropout):
-                continue
+        if is_sequential:
+            clean = tf.keras.models.Sequential()
+            input_shape = source.input_shape[1:]
 
-            config = layer.get_config()
-            if len(clean.layers) == 0:
-                config["batch_input_shape"] = (None,) + input_shape
+            for layer in source.layers:
+                if isinstance(layer, tf.keras.layers.Dropout) and not isinstance(layer, BayesianDropout):
+                    continue
 
-            new_layer = layer.__class__.from_config(config)
-            clean.add(new_layer)
-            new_layer.set_weights(layer.get_weights())
+                config = layer.get_config()
+                if len(clean.layers) == 0:
+                    config["batch_input_shape"] = (None,) + input_shape
+
+                new_layer = layer.__class__.from_config(config)
+                clean.add(new_layer)
+                new_layer.set_weights(layer.get_weights())
+
+            return clean
+
+        dropout_names = {
+            layer.name for layer in source.layers
+            if isinstance(layer, tf.keras.layers.Dropout) and not isinstance(layer, BayesianDropout)
+        }
+
+        def _clone_fn(layer):
+            if layer.name in dropout_names:
+                return lambda x: x
+            return layer.__class__.from_config(layer.get_config())
+
+        clean = tf.keras.models.clone_model(source, clone_function=_clone_fn)
+
+        src_weights = {layer.name: layer.get_weights() for layer in source.layers}
+        for layer in clean.layers:
+            weights = src_weights.get(layer.name, [])
+            if weights:
+                layer.set_weights(weights)
 
         return clean
 
