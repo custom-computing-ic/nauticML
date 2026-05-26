@@ -26,114 +26,6 @@ model:
 
 # NOTE: introduce typing so that we can type dictionaries too
 
-S7:
-  accuracy:
-    weight: 0.00
-    base: 0.99
-    min: 0.95
-  ece:
-    weight: 0.00
-    base: 0.03
-  ape:
-    weight: 0.00
-    base: 1.5
-  flops:
-    weight: 0.00
-    base: 5340192
-  power:
-    weight: -1.00
-    base: 1.80
-  energy:
-    weight: 0.00
-    base: 800000
-
-  top_n: 3
-  name: Opt-Power
-
-S8:
-  accuracy:
-    weight: 0.00
-    base: 0.99
-    min: 0.95
-  ece:
-    weight: 0.00
-    base: 0.03
-  ape:
-    weight: 0.00
-    base: 1.5
-  flops:
-    weight: 0.00
-    base: 5340192
-  power:
-    weight: 0.00
-    base: 1.80
-  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
-  # Proportional to joules at fixed clock_period. Base ~500k is the order
-  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
-  energy:
-    weight: -1.00
-    base: 800000
-
-  top_n: 3
-  name: Opt-Energy
-
-
-S10:
-  accuracy:
-    weight: 0.20
-    base: 0.99
-    min: 0.95
-  ece:
-    weight: -0.20
-    base: 0.03
-  ape:
-    weight: 0.20
-    base: 1.5
-  flops:
-    weight: -0.20
-    base: 5340192
-  power:
-    weight: 0.00
-    base: 1.80
-  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
-  # Proportional to joules at fixed clock_period. Base ~500k is the order
-  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
-  energy:
-    weight: -0.20
-    base: 800000
-
-  top_n: 3
-  name: Opt-Energy-Balanced
-
-
-S9:
-  accuracy:
-    weight: 0.20
-    base: 0.99
-    min: 0.95
-  ece:
-    weight: -0.20
-    base: 0.03
-  ape:
-    weight: 0.20
-    base: 1.5
-  flops:
-    weight: -0.20
-    base: 5340192
-  power:
-    weight: -0.20
-    base: 1.80
-  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
-  # Proportional to joules at fixed clock_period. Base ~500k is the order
-  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
-  energy:
-    weight: 0.00
-    base: 800000
-
-  top_n: 3
-  name: Opt-Power-Balanced
-
-
 S1:
   accuracy:
     weight: 0.00
@@ -278,8 +170,143 @@ S6:
   top_n: 3
   name: Opt-Balanced
 
+S7:
+  accuracy:
+    weight: 0.00
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: 0.00
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 5340192
+  power:
+    weight: -1.00
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Power
+
+S8:
+  accuracy:
+    weight: 0.00
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: 0.00
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 5340192
+  power:
+    weight: 0.00
+    base: 1.80
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: -1.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Energy
+
+
+
+S9:
+  accuracy:
+    weight: 0.20
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: -0.20
+    base: 0.03
+  ape:
+    weight: 0.20
+    base: 1.5
+  flops:
+    weight: -0.20
+    base: 5340192
+  power:
+    weight: -0.20
+    base: 1.80
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Power-Balanced
+
+S10:
+  accuracy:
+    weight: 0.20
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: -0.20
+    base: 0.03
+  ape:
+    weight: 0.20
+    base: 1.5
+  flops:
+    weight: -0.20
+    base: 5340192
+  power:
+    weight: 0.00
+    base: 1.80
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: -0.20
+    base: 800000
+
+  top_n: 3
+  name: Opt-Energy-Balanced
+
+
+S11:
+  accuracy:
+    weight: 0.00
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: -0.50
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 5340192
+  power:
+    weight: 0.50
+    base: 1.80
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Confidence-Power
+
 strategy:
-  strategies: [ S7 ]
+  strategies: [ S11 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 

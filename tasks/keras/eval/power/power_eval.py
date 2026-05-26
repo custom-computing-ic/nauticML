@@ -19,10 +19,12 @@ TCL_SCRIPT = Path(__file__).parent / "tcl_scripts" / "full_power.tcl"
 import keras
 
 CACHED_POWER_ENERGY = {
-    ("lenet", "Opt-Power"):           [(1.809, 797769), (0.4770, 210357)],
-    ("lenet", "Opt-Energy"):          [(1.809, 797769), (0.4770, 210357)],
-    ("lenet", "Opt-Energy-Balanced"): [(1.809, 797769), (0.4770, 210357)],
-    ("lenet", "Opt-Power-Balanced"):  [(1.809, 797769), (0.4770, 210357)],
+    ("lenet", "Opt-Power"):           [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
+    ("lenet", "Opt-Energy"):          [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
+    ("lenet", "Opt-Balanced"):        [(1.809, 797769), (1.2800, 677376.00)],
+    ("lenet", "Opt-Energy-Balanced"): [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
+    ("lenet", "Opt-Power-Balanced"):  [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
+    ("lenet", "Opt-Confidence-Power"): [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
 }
 
 class KerasEnergy:

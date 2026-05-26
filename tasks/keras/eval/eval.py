@@ -32,7 +32,7 @@ class KerasEval:
         ctx.eval.ece = KerasEval.evaluate_ece(ctx, y_prob)
         ctx.eval.ape = KerasEval.evaluate_ape(ctx, model)
         ctx.eval.flops = KerasEval.evaluate_flops(ctx)
-        
+
         KerasEnergy.evaluate_energy(ctx, model)
         # TODO: decouple these evaluations with a map of things to update and the acc function, and do the same in bayes opt for logging
         # TODO: decouple also the pareto frontier
