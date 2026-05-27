@@ -221,8 +221,6 @@ S8:
   top_n: 3
   name: Opt-Energy
 
-
-
 S9:
   accuracy:
     weight: 0.20
@@ -306,7 +304,7 @@ S11:
   name: Opt-Confidence-Power
 
 strategy:
-  strategies: [ S11 ]
+  strategies: [ S7 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 

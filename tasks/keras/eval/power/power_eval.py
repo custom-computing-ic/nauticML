@@ -3,10 +3,10 @@ import subprocess
 from nautic import taskx
 
 import shutil
-import tempfile
 from datetime import datetime
 
 from tasks.keras.eval.power.hls_builder import HLSBuilder
+from tasks.keras.eval.power.power_cache import PowerCache
 from tasks.keras.eval.power.tb_writer import TestbenchWriter
 
 from pathlib import Path
@@ -16,124 +16,173 @@ DEFAULT_TOP = "myproject"
 
 VIVADO_TIMEOUT = 8 * 60 * 60 # 8 hour default timeout
 TCL_SCRIPT = Path(__file__).parent / "tcl_scripts" / "full_power.tcl"
-import keras
-
-CACHED_POWER_ENERGY = {
-    ("lenet", "Opt-Power"):           [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
-    ("lenet", "Opt-Energy"):          [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
-    ("lenet", "Opt-Balanced"):        [(1.809, 797769), (1.2800, 677376.00)],
-    ("lenet", "Opt-Energy-Balanced"): [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
-    ("lenet", "Opt-Power-Balanced"):  [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
-    ("lenet", "Opt-Confidence-Power"): [(1.809, 797769), (0.4770, 210357), (1.2940, 684784.80)],
-}
 
 class KerasEnergy:
+
+    @staticmethod
+    def _check_strategy_constraints(ctx):
+        try:
+            strat_raw = ctx.bayes_opt.curr_strategy
+            strat = strat_raw.get() if hasattr(strat_raw, "get") else strat_raw
+        except Exception:
+            ctx.log.warning("No curr_strategy on ctx; skipping constraint check")
+            return True
+
+        checkable = ("accuracy", "ece", "ape", "flops")
+
+        for name in checkable:
+            try:
+                metric_raw = getattr(ctx.eval, name)
+                metric_val = metric_raw.get() if hasattr(metric_raw, "get") else metric_raw
+            except Exception:
+                continue
+            if metric_val is None:
+                continue
+
+            try:
+                bounds_raw = getattr(strat, name, None)
+                bounds = bounds_raw.get() if hasattr(bounds_raw, "get") else bounds_raw
+            except Exception:
+                continue
+            if bounds is None:
+                continue
+
+            def _read(field):
+                try:
+                    v = bounds.get(field) if hasattr(bounds, "get") and not callable(getattr(bounds, "get", None).__self__.__class__ if False else None) else getattr(bounds, field, None)
+                except Exception:
+                    v = None
+
+                try:
+                    if hasattr(bounds, field):
+                        raw = getattr(bounds, field)
+                        return raw.get() if hasattr(raw, "get") else raw
+                except Exception:
+                    pass
+                try:
+                    raw = bounds[field]
+                    return raw.get() if hasattr(raw, "get") else raw
+                except Exception:
+                    return None
+
+            lo = _read("min")
+            hi = _read("max")
+
+            if lo is not None and metric_val < float(lo):
+                ctx.log.info(
+                    f"Constraint violated: {name}={metric_val} < min={lo} "
+                    f"(strategy={getattr(strat, 'name', '?')}); skipping power eval"
+                )
+                return False
+            if hi is not None and metric_val > float(hi):
+                ctx.log.info(
+                    f"Constraint violated: {name}={metric_val} > max={hi} "
+                    f"(strategy={getattr(strat, 'name', '?')}); skipping power eval"
+                )
+                return False
+
+        return True
+
     @taskx
     def evaluate_energy(ctx, model):
-        
-        # bo.iteration is assigned directly (`bo.iteration = 0` in bayes_opt
-        # init), so it's a plain int — no .get() wrapper. Use hasattr to be
-        # defensive against future schema changes; fall back to "manual" for
-        # standalone (non-DSE) invocations where ctx.bayes_opt doesn't exist.
         try:
             iter_raw = ctx.bayes_opt.iteration
             iter_num = iter_raw.get() if hasattr(iter_raw, "get") else iter_raw
         except Exception:
             iter_num = "manual"
 
-        # Short-circuit using the CACHED_POWER_ENERGY map: if we've previously
-        # run this (model, strategy) up to iteration N, reuse those values
-        # rather than paying the ~30-min Vivado cost again. Index 0 == iter 1.
-        try:
-            model_name_raw = ctx.model.name
-            model_name = model_name_raw.get() if hasattr(model_name_raw, "get") else model_name_raw
-        except Exception:
-            model_name = None
-        try:
-            strategy_name_raw = ctx.bayes_opt.curr_strategy.name
-            strategy_name = strategy_name_raw.get() if hasattr(strategy_name_raw, "get") else strategy_name_raw
-        except Exception:
-            strategy_name = None
+        power_metrics = {
+            "power": None, "energy": None, "max_ii": None,
+            "resources": {}, "timing": {},
+        }
 
-        cache = CACHED_POWER_ENERGY.get((model_name, strategy_name), [])
-        if isinstance(iter_num, int) and 1 <= iter_num <= len(cache):
-            cached_power, cached_energy = cache[iter_num - 1]
-            ctx.eval.power = cached_power
-            ctx.eval.energy = cached_energy
+        project_dir = None
+        from_cache = False
+
+        if (cached_values := PowerCache.probe_cache(ctx)) is not None:
+            power_metrics.update(cached_values)
+            from_cache = True
             ctx.log.info(
-                f"Using cached values for ({model_name}, {strategy_name}) "
-                f"iter={iter_num}: power={cached_power} W, "
-                f"energy={cached_energy} W·cycles (skipping Vivado)"
+                f"Using cached values for iter={iter_num}: "
+                f"power={cached_values['power']} W, "
+                f"energy={cached_values['energy']} W·cycles"
             )
-            return
+        else:
+            if not KerasEnergy._check_strategy_constraints(ctx):
+                ctx.eval.power = None
+                ctx.eval.energy = None
+               
+                return
 
-        # Each BO iteration gets its own iter+timestamp+pid project_dir to
-        # avoid collisions between concurrent runs (two processes reaching
-        # iter=1 in the same second would otherwise share dirs and clobber
-        # each other's Vivado state) and stale-snapshot reuse by xsim.
-        project_root = "/mnt/ccnas2/bdp/gt922/tmp/nauticml_projects"
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        project_dir = os.path.join(
-            project_root,
-            f"nauticml_pe_prj_iter{iter_num}_{timestamp}_pid{os.getpid()}",
-        )
-        Path(project_dir).mkdir(parents=True, exist_ok=True)
-
-        hls_dir = project_dir
-        ctx.hls4ml.hls_project_dir = hls_dir
-
-        try:
-            if shutil.which("vivado") is None:
-                raise RuntimeError("Vivado not found on PATH — skipping power estimation")
-
-            HLSBuilder.build_hls_from_model(ctx, model)
-
-            if (code := KerasEnergy.run_vivado_power_estimation(ctx)) != 0:
-                raise RuntimeError(f"Vivado power estimation failed with return code: {code}")
-
-            dyn_power, resources, timing = KerasEnergy.extract_power_and_resources(ctx)
-            if dyn_power is None or resources is None:
-                raise ValueError(f"dynamic power and resources not parsed from power estimation at {hls_dir}")
-
-            # power: Vivado-reported dynamic dynamic power (W).
-            # energy: dyn_power × max_layer_II × num_mc_samples.
-            #   Proportional to actual joules per prediction (one prediction
-            #   = N MC forward passes). At fixed clock_period the missing
-            #   1/f_clk factor is a constant — doesn't affect BO ranking but
-            #   makes the metric's order of magnitude reflect "per prediction".
-            max_ii_raw = ctx.hls4ml.max_ii
-            max_ii = max_ii_raw.get() if hasattr(max_ii_raw, "get") else max_ii_raw
-            n_mc_raw = ctx.hls4ml.num_mc_samples
-            n_mc = n_mc_raw.get() if hasattr(n_mc_raw, "get") else n_mc_raw
-            energy = dyn_power * max_ii * int(n_mc)
-
-            ctx.eval.power = dyn_power
-            ctx.eval.energy = energy
-
-            ctx.log.info(
-                f"Power eval: power={dyn_power:.4f} W, max_ii={max_ii} cycles, "
-                f"n_mc={n_mc}, energy={energy:.2f} W·cycles"
+            project_root = "/mnt/ccnas2/bdp/gt922/tmp/nauticml_projects"
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            project_dir = os.path.join(
+                project_root,
+                f"nauticml_pe_prj_iter{iter_num}_{timestamp}_pid{os.getpid()}",
             )
+            Path(project_dir).mkdir(parents=True, exist_ok=True)
+            ctx.hls4ml.hls_project_dir = project_dir
 
-            KerasEnergy.save_power_artifacts(
-                ctx, dyn_power=dyn_power, max_ii=max_ii,
-                energy=energy, resources=resources, timing=timing,
-            )
-
-        except Exception as e:
-            ctx.log.error(f"Power eval failed: {e}")
-            HLSBuilder.dump_hls_failure_log(ctx.log, hls_dir)
-
-            ctx.eval.power = None
-            ctx.eval.energy = None
-
-        finally:
             try:
-                shutil.rmtree(project_dir, ignore_errors=True)
-            except Exception as e:
-                ctx.log.warning(
-                    f"Failed to clean up project dir {project_dir}: {e}"
+                if shutil.which("vivado") is None:
+                    raise RuntimeError("Vivado not found on PATH — skipping power estimation")
+
+                HLSBuilder.build_hls_from_model(ctx, model)
+
+                if (code := KerasEnergy.run_vivado_power_estimation(ctx)) != 0:
+                    raise RuntimeError(f"Vivado power estimation failed with return code: {code}")
+
+                dyn_power, resources, timing = KerasEnergy.extract_power_and_resources(ctx)
+                if dyn_power is None or resources is None:
+                    raise ValueError(f"dynamic power and resources not parsed at {project_dir}")
+
+                max_ii_raw = ctx.hls4ml.max_ii
+                max_ii = max_ii_raw.get() if hasattr(max_ii_raw, "get") else max_ii_raw
+                n_mc_raw = ctx.hls4ml.num_mc_samples
+                n_mc = n_mc_raw.get() if hasattr(n_mc_raw, "get") else n_mc_raw
+                energy = dyn_power * max_ii * int(n_mc)
+
+                ctx.log.info(
+                    f"Power eval: power={dyn_power:.4f} W, max_ii={max_ii} cycles, "
+                    f"n_mc={n_mc}, energy={energy:.2f} W·cycles"
                 )
+
+                power_metrics.update({
+                    "power": dyn_power,
+                    "energy": energy,
+                    "max_ii": max_ii,
+                    "resources": resources,
+                    "timing": timing,
+                })
+
+            except Exception as e:
+                ctx.log.error(f"Power eval failed: {e}")
+                HLSBuilder.dump_hls_failure_log(ctx.log, project_dir)
+
+            finally:
+                try:
+                    PowerCache.write_cache(ctx, **power_metrics)
+                except Exception as e:
+                    ctx.log.warning(f"Failed to write power cache: {e}")
+
+                if project_dir is not None:
+                    try:
+                        shutil.rmtree(project_dir, ignore_errors=True)
+                    except Exception as e:
+                        ctx.log.warning(f"Failed to clean up {project_dir}: {e}")
+
+        ctx.eval.power  = power_metrics["power"]
+        ctx.eval.energy = power_metrics["energy"]
+
+        KerasEnergy.save_power_artifacts(
+            ctx,
+            dyn_power=power_metrics["power"],
+            max_ii=power_metrics["max_ii"],
+            energy=power_metrics["energy"],
+            resources=power_metrics["resources"],
+            timing=power_metrics["timing"],
+            copy_files=not from_cache,  
+        )
 
     @staticmethod
     def extract_power_and_resources(ctx):
@@ -187,22 +236,13 @@ class KerasEnergy:
         return out
 
     @staticmethod
-    def save_power_artifacts(ctx, *, dyn_power, max_ii, energy, resources, timing):
-        """
-        Persist post-synth power/util/timing reports for this BO iteration.
-        project_dir is rm-tree'd in `finally`, so we copy what's worth keeping
-        into experiment.save_dir/power_artifacts/iter_<N>/ and log table
-        artifacts so they show up in the Prefect UI.
-        """
+    def save_power_artifacts(ctx, *, dyn_power, max_ii, energy, resources, timing, copy_files=True):
         try:
             iter_raw = ctx.bayes_opt.iteration
             iter_num = iter_raw.get() if hasattr(iter_raw, "get") else iter_raw
         except Exception:
             iter_num = "manual"
 
-        # PID-tagged artifact key so concurrent processes don't clobber each
-        # other's Prefect artifacts (same iter_num collides otherwise).
-        # Prefect keys: lowercase letters, digits, dashes ONLY — no underscores.
         artifact_key_suffix = f"iter{iter_num}-pid{os.getpid()}"
 
         save_dir_raw = ctx.experiment.save_dir
@@ -210,33 +250,36 @@ class KerasEnergy:
         artifact_dir = save_dir / "power_artifacts" / f"iter_{iter_num}"
         artifact_dir.mkdir(parents=True, exist_ok=True)
 
-        src_dir = Path(ctx.hls4ml.hls_project_dir) / "power_estimation"
-        for fname in (
-            "power_synth.xml",
-            "power_synth_verbose.txt",
-            "power_synth_hierarchical.txt",
-            "utilization.xml",
-            "utilization_hierarchical.txt",
-            "timing_summary.txt",
-            "switching_synth_breakdown.txt",
-        ):
-            src = src_dir / fname
-            if src.exists():
-                shutil.copy(src, artifact_dir / fname)
+        if copy_files:
+            src_dir = Path(ctx.hls4ml.hls_project_dir) / "power_estimation"
+            for fname in (
+                "power_synth.xml",
+                "power_synth_verbose.txt",
+                "power_synth_hierarchical.txt",
+                "utilization.xml",
+                "utilization_hierarchical.txt",
+                "timing_summary.txt",
+                "switching_synth_breakdown.txt",
+            ):
+                src = src_dir / fname
+                if src.exists():
+                    shutil.copy(src, artifact_dir / fname)
 
         ctx.log.artifact(
             key=f"power-{artifact_key_suffix}",
             table=[
-                {"metric": "dynamic_w",        "value": dyn_power},
-                {"metric": "max_ii_cycles",    "value": max_ii},
-                {"metric": "energy_w_cycles",  "value": energy},
+                {"metric": "dynamic_w",       "value": dyn_power},
+                {"metric": "max_ii_cycles",   "value": max_ii},
+                {"metric": "energy_w_cycles", "value": energy},
             ],
         )
+
         if resources:
             ctx.log.artifact(
                 key=f"resources-{artifact_key_suffix}",
                 table=[{"resource": k, "count": v} for k, v in resources.items()],
             )
+
         if timing:
             ctx.log.artifact(
                 key=f"timing-{artifact_key_suffix}",
