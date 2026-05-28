@@ -68,6 +68,8 @@ class HLSBuilder:
         # hls_model = HLSBuilder.write_hls_model_bayes(ctx, hls_model)
         hls_model.write()
 
+        HLSBuilder.patch_dataflow_weights(Path(hls_dir), ctx.log)
+
         # Optional Vitis 2022.2+ TCL patch.
         if getattr(ctx.hls4ml, "patch_vitis_2022_2", False):
             HLSBuilder.patch_build_prj(Path(hls_dir), ctx.log)
@@ -204,9 +206,7 @@ class HLSBuilder:
                 f"strip_for_hls expects a single-output model, got {len(source.outputs)}"
             )
 
-        is_sequential = isinstance(source, tf.keras.Sequential)
-
-        if is_sequential:
+        if isinstance(source, tf.keras.Sequential):
             clean = tf.keras.models.Sequential()
             input_shape = source.input_shape[1:]
 
@@ -439,3 +439,53 @@ class HLSBuilder:
                 f"No build_prj.tcl under {project_dir} contained "
                 "maximum_size/cosim/export lines to strip"
             )
+
+    @staticmethod
+    def patch_dataflow_weights(project_dir, log):
+        """
+        Vitis HLS 2022.2+ rejects global variables referenced inside a
+        #pragma HLS DATAFLOW region ([HLS 214-113]).  hls4ml declares weight
+        arrays at file scope (via parameters.h) and the nnet:: function calls
+        inside the DATAFLOW body reference them.
+
+        Fix: strip weight #include lines from parameters.h and inject them
+        into myproject.cpp's function body just before the DATAFLOW pragma,
+        turning the weights into function-local arrays that satisfy the
+        canonical form.  Layer-config structs stay in parameters.h (they
+        define types needed by stream declarations).
+        """
+        params_h = project_dir / "firmware" / "parameters.h"
+        project_cpp = project_dir / "firmware" / "myproject.cpp"
+
+        if not params_h.exists() or not project_cpp.exists():
+            return
+
+        params_text = params_h.read_text()
+        weight_lines = []
+        cleaned_params_lines = []
+        for line in params_text.splitlines(keepends=True):
+            if line.strip().startswith('#include') and '/weights/' in line:
+                weight_lines.append(line)
+            else:
+                cleaned_params_lines.append(line)
+
+        if not weight_lines:
+            return
+
+        cpp_text = project_cpp.read_text()
+        if '#pragma HLS DATAFLOW' not in cpp_text:
+            return
+
+        params_h.write_text(''.join(cleaned_params_lines))
+
+        weight_block = ''.join('    ' + l.lstrip() for l in weight_lines)
+        cpp_text = cpp_text.replace(
+            '    #pragma HLS DATAFLOW',
+            weight_block + '    #pragma HLS DATAFLOW',
+        )
+        project_cpp.write_text(cpp_text)
+
+        log.info(
+            f"Moved {len(weight_lines)} weight #include(s) from parameters.h "
+            f"into myproject.cpp function body for DATAFLOW compliance"
+        )
