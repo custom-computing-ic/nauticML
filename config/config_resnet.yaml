@@ -4,7 +4,8 @@ experiment:
   seed: 42
   save_dir: ./prj/exp_cifar_bayes_resnet
   save_model: cifar_resnet_tmp_3bayeslayer_mc
-  cpu: True
+  # cpu: True
+  gpus: [2]
   ckpt_file: best_chkp.tf
 
 dataset:

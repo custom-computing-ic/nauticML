@@ -1,6 +1,8 @@
 import os
 import shutil
 
+import tensorflow as tf
+from tensorflow.keras import backend as K
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_callbacks
@@ -9,6 +11,36 @@ from nautic import taskx
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 from tasks.keras.svhn.utils import CosineAnnealingScheduler
+
+
+def _switch_to_cpu(log):
+    """Release GPU memory and make subsequent TF ops run on CPU."""
+    K.clear_session()
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    try:
+        tf.config.set_visible_devices([], 'GPU')
+    except RuntimeError as e:
+        # set_visible_devices fails if devices have already been initialized;
+        # the tf.device('/CPU:0') wrapper below still forces CPU placement.
+        log.warning(f"Could not hide GPUs after init: {e}")
+
+
+def _fit_with_cpu_fallback(ctx, fit_fn):
+    """Run fit_fn(model); on GPU OOM, rebuild the model on CPU and retry."""
+    log = ctx.log
+    try:
+        return fit_fn(ctx.model.logic)
+    except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
+        log.warning(
+            f"GPU training failed ({type(e).__name__}: {e}). "
+            "Falling back to CPU."
+        )
+        _switch_to_cpu(log)
+        # Local import to avoid a circular import at module load.
+        from tasks.keras.model_factory import KerasModels
+        with tf.device('/CPU:0'):
+            KerasModels.get_model(ctx)
+            return fit_fn(ctx.model.logic)
 
 class KerasTrain:
     @taskx
@@ -22,7 +54,6 @@ class KerasTrain:
             dataset: The dataset dictionary returned by get_dataset().
         """
         log = ctx.log
-        model = ctx.model.logic
         dataset = ctx.dataset.data
 
         class ProgressCallback(Callback):
@@ -65,14 +96,17 @@ class KerasTrain:
             nepoch = ctx.train.num_epoch - 1
             callbacks.append(ProgressCallback())
 
-            train_stat = model.fit(
-                dataset['x_train'],
-                dataset['y_train'],
-                batch_size=ctx.train.batch_size,
-                epochs=ctx.train.num_epoch,
-                initial_epoch=1,
-                validation_split=ctx.train.validation_split,
-                callbacks=callbacks)
+            def _fit_lenet(m):
+                return m.fit(
+                    dataset['x_train'],
+                    dataset['y_train'],
+                    batch_size=ctx.train.batch_size,
+                    epochs=ctx.train.num_epoch,
+                    initial_epoch=1,
+                    validation_split=ctx.train.validation_split,
+                    callbacks=callbacks)
+
+            train_stat = _fit_with_cpu_fallback(ctx, _fit_lenet)
 
             history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
             log.artifact(table=history,
@@ -119,11 +153,14 @@ class KerasTrain:
             nepoch = ctx.train.num_epoch - 1
             callbacks.append(ProgressCallback())
 
-            train_stat = model.fit(train_gen,
-                epochs=ctx.train.num_epoch,
-                callbacks=callbacks,
-                validation_data=(dataset['x_val'], dataset['y_val']),
-                )
+            def _fit_resnet(m):
+                return m.fit(train_gen,
+                    epochs=ctx.train.num_epoch,
+                    callbacks=callbacks,
+                    validation_data=(dataset['x_val'], dataset['y_val']),
+                    )
+
+            train_stat = _fit_with_cpu_fallback(ctx, _fit_resnet)
 
             history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
             log.artifact(table=history,
