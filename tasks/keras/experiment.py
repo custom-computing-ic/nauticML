@@ -58,6 +58,23 @@ class KerasExperiment:
                     raise ValueError(f"Invalid GPU index in {gpu_indices}. Available GPUs: {len(gpus)}")
                 except RuntimeError as e:
                     print("❌ RuntimeError during GPU configuration:", e)
+
+                # On the shared accelerator hardware the selected GPU may be
+                # visible but unusable (out of memory, driver contention, etc.).
+                # Probe it now — a tiny matmul forces device init and Grappler
+                # cluster creation, the same paths that later blow up deep in
+                # training/eval. If the probe fails, fall back to CPU upfront
+                # rather than crashing mid-pipeline. After set_visible_devices
+                # the selected GPUs are remapped to /GPU:0.. in TF's view.
+                try:
+                    with tf.device('/GPU:0'):
+                        _ = tf.matmul(tf.ones((8, 8)), tf.ones((8, 8))).numpy()
+                except Exception as probe_err:
+                    log.warning(
+                        f"⚠️ GPU probe failed ({type(probe_err).__name__}: {probe_err}). "
+                        "Falling back to CPU for this run."
+                    )
+                    return configure_gpus(True, [])
             else:
                 log.warning("⚠️ CPU used by default as no CPU or GPU indices provided are empty")
                 return configure_gpus(True, [])

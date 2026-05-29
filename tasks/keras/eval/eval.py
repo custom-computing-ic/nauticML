@@ -82,20 +82,22 @@ class KerasEval:
         if batch_size is None:
             batch_size = 1
 
-        # convert tf.keras model into frozen graph to count FLOPS about operations used at inference
-        # FLOPS depends on batch size
-        inputs = [
-            tf.TensorSpec([batch_size] + inp.shape[1:], inp.dtype) for inp in model.inputs
-        ]
+        # Force CPU placement: convert_variables_to_constants_v2_as_graph spins
+        # up a Grappler cluster which on the shared accelerator hardware can
+        # fail with UnknownError("Failed to create session") if the GPU is
+        # contended. FLOPS counting is a static graph op — no need for GPU.
+        with tf.device('/CPU:0'):
+            inputs = [
+                tf.TensorSpec([batch_size] + inp.shape[1:], inp.dtype) for inp in model.inputs
+            ]
 
-        real_model = tf.function(model).get_concrete_function(inputs)
-        frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
+            real_model = tf.function(model).get_concrete_function(inputs)
+            frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
 
-        # Calculate FLOPS with tf.profiler
-        run_meta = tf.compat.v1.RunMetadata()
-        opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
-        flops = tf.compat.v1.profiler.profile(
-            graph=frozen_func.graph, run_meta=run_meta, cmd="scope", options=opts
-        )
+            run_meta = tf.compat.v1.RunMetadata()
+            opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
+            flops = tf.compat.v1.profiler.profile(
+                graph=frozen_func.graph, run_meta=run_meta, cmd="scope", options=opts
+            )
 
         return flops.total_float_ops
