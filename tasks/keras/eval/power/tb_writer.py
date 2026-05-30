@@ -142,9 +142,13 @@ class TestbenchWriter:
         """
         Number of output stream beats per inference.
 
-        The output layer's flat element count is packed into TDATA chunks of
-        width `out_elem_width`. One beat carries floor(TDATA / elem_width)
-        elements, so beats_per_sample = ceil(n_elements / elems_per_beat).
+        IMPORTANT: the output element width is read from the synthesized RTL
+        TDATA, not the config's `result` precision. hls4ml gives a softmax head
+        its own result type (commonly 16 bits) regardless of the swept `result`,
+        so trusting out_elem_width (from output_precision_WI) breaks with
+        `TDATA width 32 not divisible by element width 12`. We derive the real
+        per-element width as TDATA / n_elements when that divides cleanly, and
+        keep the config value only as a fallback.
         """
         last_shape = qmodel.layers[-1].output_shape
         if isinstance(last_shape, list):
@@ -156,10 +160,19 @@ class TestbenchWriter:
             n_elements *= int(d)
 
         tdata_w = ports["output_stream"]["tdata_width"]
+
+        # Preferred: trust the RTL. All N classifier outputs pack into TDATA at
+        # the synthesized element width; TDATA / N is that width.
+        if n_elements > 0 and tdata_w % n_elements == 0:
+            true_elem_width = tdata_w // n_elements
+            elems_per_beat = tdata_w // true_elem_width
+            return math.ceil(n_elements / elems_per_beat)
+
+        # Fallback: config-derived width.
         if tdata_w % out_elem_width != 0:
             raise ValueError(
-                f"output TDATA width {tdata_w} not divisible by "
-                f"element width {out_elem_width}"
+                f"output TDATA width {tdata_w} not divisible by element width "
+                f"{out_elem_width} nor by element count {n_elements}"
             )
         elems_per_beat = tdata_w // out_elem_width
         return math.ceil(n_elements / elems_per_beat)

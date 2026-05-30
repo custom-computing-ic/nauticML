@@ -65,6 +65,18 @@ class HLSBuilder:
             backend="Vitis",
         )
 
+        # Read back the precision hls4ml actually resolved (accum/result) from
+        # any 'auto' fields, so downstream analysis correlates power/resources
+        # against the widths truly synthesized, not just what we requested.
+        from tasks.keras.eval.power.read_resolved_accums import read_resolved_accums
+        resolved = read_resolved_accums(hls_model)
+        ctx.hls4ml.resolved_precision = resolved
+        if resolved:
+            ctx.log.info(
+                "resolved accums: "
+                + ", ".join(f"{n}:{v['accum']}" for n, v in resolved.items())
+            )
+
         # hls_model = HLSBuilder.write_hls_model_bayes(ctx, hls_model)
         hls_model.write()
 
@@ -97,9 +109,9 @@ class HLSBuilder:
     def convert_from_nauticml(ctx, model):
         """
         Strip the NauticML model, then build an hls4ml config with per-layer
-        reuse factors and pinned precision. Adds the two safety passes from
-        the SAIF code (strategy-case normalisation, narrow-precision widening)
-        and a guardrail against silent fallback to Model defaults.
+        reuse factors and the configured precision pinned directly (no
+        narrow-precision widening), plus a guardrail against silent fallback
+        to Model defaults.
         """
         stripped_model = HLSBuilder.strip_for_hls(model)
 
@@ -160,11 +172,6 @@ class HLSBuilder:
         hls_config["Model"]["Strategy"] = ctx.hls4ml.hls_config.strategy
 
         hls_config["Model"]["ConvImplementation"] = "LineBuffer"
-
-        # catch any per-layer precision narrower than
-        # ap_fixed<32,16> on accum/result. No-op for current NauticML because
-        # we pin precisions ourselves, but defensive for future overrides.
-        HLSBuilder._widen_narrow_precisions(hls_config)
 
         # Guardrail: every compute layer must have a LayerName entry. Without
         # this, hls4ml silently uses Model defaults
@@ -296,35 +303,6 @@ class HLSBuilder:
             rf = max(rf, layer.kernel_size[0])
 
         return rf
-
-    @staticmethod
-    def _widen_narrow_precisions(hls_config):
-        SAFE_PREC = "ap_fixed<24, 14>"
-        WIDEN_KEYS = ("accum", "result")
-        # Activations derive internal table-index types from accum/result;
-        # widening these explodes table sizes past 32 bits.
-        SKIP_NAMES = ("softmax", "sigmoid", "tanh", "relu")
-
-        def _bits(prec_str):
-            m = re.search(r"<\s*(\d+)\s*,\s*(\d+)", prec_str)
-            return (int(m.group(1)), int(m.group(2))) if m else (0, 0)
-
-        for layer_name, layer_cfg in hls_config.get("LayerName", {}).items():
-            if not isinstance(layer_cfg, dict):
-                continue
-            if any(s in layer_name.lower() for s in SKIP_NAMES):
-                continue
-            prec = layer_cfg.get("Precision")
-            if not isinstance(prec, dict):
-                continue
-            for key in WIDEN_KEYS:
-                cur = prec.get(key)
-                if not isinstance(cur, str) or cur == "auto":
-                    continue
-                W, I = _bits(cur)
-                if W < 32 or I < 16:
-                    prec[key] = SAFE_PREC
-        return hls_config
 
     @staticmethod
     def write_hls_model_bayes(ctx, hls_model):
