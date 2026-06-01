@@ -41,7 +41,13 @@ def perform_optimization(ctx):
                 engine.strategy.save_results()
                 engine.strategy.next_strategy()
                 break
-                
+
+            # If every metric for this point is already cached, skip the
+            # expensive train + eval and loop straight back for a new point.
+            engine.keras.eval.probe_cache()
+            if ctx.eval.cached:
+                continue
+
             engine.keras.get_model()
 
             engine.keras.trust.build_bayesian_model()

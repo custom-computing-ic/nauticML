@@ -245,6 +245,9 @@ eval:
   power: <float>
   energy: <float>
 
+  # set True by eval.probe_cache when the whole point is already cached
+  cached: <bool>
+
   mc_samples: 10
   num_eval_images: 200
   num_bins: 10

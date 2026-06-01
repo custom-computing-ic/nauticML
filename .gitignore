@@ -3,3 +3,5 @@ prj/
 __pycache__/
 .vscode/
 libdevice.10.bc
+# tasks/keras/eval/metrics_cache.json
+tasks/keras/eval/power/power_cache.json
