@@ -17,6 +17,15 @@ DEFAULT_TOP = "myproject"
 VIVADO_TIMEOUT = 8 * 60 * 60 # 8 hour default timeout
 TCL_SCRIPT = Path(__file__).parent / "tcl_scripts" / "full_power.tcl"
 
+# Valid values for the hls4ml.proxy knob (see KerasEnergy.compute_proxy).
+PROXY_MODES = ("ff", "params", "model_proxy")
+
+
+def _unwrap(val):
+    """Unwrap a nautic context value, which may be wrapped in a ref."""
+    return val.get() if hasattr(val, "get") else val
+
+
 class KerasEnergy:
 
     @staticmethod
@@ -117,8 +126,12 @@ class KerasEnergy:
             if not KerasEnergy._check_strategy_constraints(ctx):
                 ctx.eval.power = None
                 ctx.eval.energy = None
-               
+
                 return
+
+            # Resolve before creating anything so a config typo fails fast
+            # without leaving an orphan project dir behind.
+            proxy_mode = KerasEnergy._resolve_proxy_mode(ctx)
 
             project_root = "/mnt/ccnas2/bdp/gt922/tmp/nauticml_projects"
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -130,36 +143,56 @@ class KerasEnergy:
             ctx.hls4ml.hls_project_dir = project_dir
 
             try:
-                if shutil.which("vivado") is None:
+                # The Vivado estimator needs vivado on PATH; the proxy modes
+                # only need the (cheaper) HLS C-synthesis below.
+                if not proxy_mode and shutil.which("vivado") is None:
                     raise RuntimeError("Vivado not found on PATH — skipping power estimation")
 
                 HLSBuilder.build_hls_from_model(ctx, get_model())
 
-                if (code := KerasEnergy.run_vivado_power_estimation(ctx)) != 0:
-                    raise RuntimeError(f"Vivado power estimation failed with return code: {code}")
+                max_ii = _unwrap(ctx.hls4ml.max_ii)
 
-                dyn_power, resources, timing = KerasEnergy.extract_power_and_resources(ctx)
-                if dyn_power is None or resources is None:
-                    raise ValueError(f"dynamic power and resources not parsed at {project_dir}")
+                if proxy_mode:
+                    # Proxy mode: derive a cheap value from the synthesis report
+                    # / model to stand in for power, then carry it through the
+                    # same energy = power × max_ii × n_mc relationship.
+                    proxy_value = KerasEnergy.compute_proxy(ctx, proxy_mode)
+                    n_mc = int(_unwrap(ctx.hls4ml.num_mc_samples))
+                    energy = proxy_value * max_ii * n_mc
+                    ctx.log.info(
+                        f"Power proxy [{proxy_mode}]={proxy_value}, max_ii={max_ii}, "
+                        f"n_mc={n_mc}, energy={energy}"
+                    )
+                    power_metrics.update({
+                        "power": proxy_value,
+                        "energy": energy,
+                        "max_ii": max_ii,
+                        "resources": {},
+                        "timing": {},
+                    })
+                else:
+                    if (code := KerasEnergy.run_vivado_power_estimation(ctx)) != 0:
+                        raise RuntimeError(f"Vivado power estimation failed with return code: {code}")
 
-                max_ii_raw = ctx.hls4ml.max_ii
-                max_ii = max_ii_raw.get() if hasattr(max_ii_raw, "get") else max_ii_raw
-                n_mc_raw = ctx.hls4ml.num_mc_samples
-                n_mc = n_mc_raw.get() if hasattr(n_mc_raw, "get") else n_mc_raw
-                energy = dyn_power * max_ii * int(n_mc)
+                    dyn_power, resources, timing = KerasEnergy.extract_power_and_resources(ctx)
+                    if dyn_power is None or resources is None:
+                        raise ValueError(f"dynamic power and resources not parsed at {project_dir}")
 
-                ctx.log.info(
-                    f"Power eval: power={dyn_power:.4f} W, max_ii={max_ii} cycles, "
-                    f"n_mc={n_mc}, energy={energy:.2f} W·cycles"
-                )
+                    n_mc = int(_unwrap(ctx.hls4ml.num_mc_samples))
+                    energy = dyn_power * max_ii * n_mc
 
-                power_metrics.update({
-                    "power": dyn_power,
-                    "energy": energy,
-                    "max_ii": max_ii,
-                    "resources": resources,
-                    "timing": timing,
-                })
+                    ctx.log.info(
+                        f"Power eval: power={dyn_power:.4f} W, max_ii={max_ii} cycles, "
+                        f"n_mc={n_mc}, energy={energy:.2f} W·cycles"
+                    )
+
+                    power_metrics.update({
+                        "power": dyn_power,
+                        "energy": energy,
+                        "max_ii": max_ii,
+                        "resources": resources,
+                        "timing": timing,
+                    })
 
             except Exception as e:
                 ctx.log.error(f"Power eval failed: {e}")
@@ -188,6 +221,83 @@ class KerasEnergy:
             resources=power_metrics["resources"],
             timing=power_metrics["timing"],
             copy_files=not from_cache,  
+        )
+
+    @staticmethod
+    def _resolve_proxy_mode(ctx):
+        """Return the configured power proxy mode, or None for estimator mode.
+
+        Raises if the knob is set to an unknown value so a typo fails loudly
+        rather than silently falling back to the Vivado estimator.
+        """
+        mode = _unwrap(getattr(ctx.hls4ml, "proxy", None))
+        if mode is None or mode == "":
+            return None
+        if mode not in PROXY_MODES:
+            raise ValueError(
+                f"Unknown hls4ml.proxy={mode!r}; expected one of {PROXY_MODES}"
+            )
+        return mode
+
+    @staticmethod
+    def compute_proxy(ctx, mode):
+        """Compute a cheap power/energy proxy after HLS C-synthesis.
+
+        Modes:
+          ff           -> pre_ff (HLS FF estimate)
+          params       -> synthesized model parameter count
+          model_proxy  -> pre_ff**2 * pre_interval_max**0.5
+        """
+        if mode == "params":
+            params = _unwrap(ctx.hls4ml.model_params)
+            if params is None:
+                raise ValueError("proxy 'params': model_params not available on ctx")
+            return float(params)
+
+        pre_ff, pre_interval_max = KerasEnergy.extract_csynth_estimates(ctx)
+
+        if mode == "ff":
+            if pre_ff is None:
+                raise ValueError("proxy 'ff': could not read FF from csynth report")
+            return float(pre_ff)
+
+        if mode == "model_proxy":
+            if pre_ff is None or pre_interval_max is None:
+                raise ValueError(
+                    "proxy 'model_proxy': missing pre_ff/pre_interval_max in csynth report"
+                )
+            return float(pre_ff) ** 2 * float(pre_interval_max) ** 0.5
+
+        raise ValueError(f"Unknown proxy mode: {mode!r}")
+
+    @staticmethod
+    def extract_csynth_estimates(ctx):
+        """Read (pre_ff, pre_interval_max) from the top-level HLS C-synthesis report."""
+        import xml.etree.ElementTree as ET
+
+        report = (
+            Path(ctx.hls4ml.hls_project_dir)
+            / "myproject_prj" / "solution1" / "syn" / "report"
+            / f"{DEFAULT_TOP}_csynth.xml"
+        )
+        if not report.exists():
+            return None, None
+
+        try:
+            root = ET.parse(report).getroot()
+        except ET.ParseError:
+            return None, None
+
+        def _txt(path):
+            el = root.find(path)
+            return el.text if el is not None and el.text else None
+
+        ff = _txt(".//AreaEstimates/Resources/FF")
+        interval_max = _txt(".//PerformanceEstimates/SummaryOfOverallLatency/Interval-max")
+
+        return (
+            float(ff) if ff is not None else None,
+            float(interval_max) if interval_max is not None else None,
         )
 
     @staticmethod

@@ -25,14 +25,23 @@ _FIELD_SPECS = {
     "clk":   (lambda ctx: _unwrap(ctx.hls4ml.hls_config.clock_period),  lambda v: round(float(v), 6)),
     "fpga":  (lambda ctx: _unwrap(ctx.hls4ml.hls_config.fpga_part),     str),
     "rf":    (lambda ctx: _unwrap(ctx.hls4ml.hls_config.reuse_factor),  int),
+    # Power proxy mode (ff | params | model_proxy). None in the default
+    # Vivado-estimator mode, in which case it is omitted from the key so
+    # estimator-mode entries stay backward-compatible (see make_key).
+    "proxy": (lambda ctx: _unwrap(getattr(ctx.hls4ml, "proxy", None)),  str),
 }
+
+# Fields that are dropped from the key when their value is None, rather than
+# making the whole key unbuildable. Keeps estimator-mode power keys identical
+# to before the proxy knob existed.
+_OPTIONAL_FIELDS = {"proxy"}
 
 # Fields that make up the cache key for each metric. Software metrics
 # (accuracy, ece, ...) only depend on the model and its tunable params, so
 # their results are reused across FPGA targets. Power additionally depends on
 # the target device / clock / reuse factor, so those are folded into its key.
 BASE_FIELDS = ("model", "dr", "pr", "nbl", "sf", "mc")
-POWER_FIELDS = BASE_FIELDS + ("clk", "fpga", "rf")
+POWER_FIELDS = BASE_FIELDS + ("clk", "fpga", "rf", "proxy")
 
 METRIC_KEY_FIELDS = {
     "accuracy": BASE_FIELDS,
@@ -76,7 +85,10 @@ class CacheManager:
             parts = []
             for name in fields:
                 extract, fmt = _FIELD_SPECS[name]
-                parts.append(f"{name}={fmt(extract(ctx))}")
+                value = extract(ctx)
+                if value is None and name in _OPTIONAL_FIELDS:
+                    continue  # e.g. estimator mode: no proxy suffix
+                parts.append(f"{name}={fmt(value)}")
         except Exception:
             return None
         return "|".join(parts)

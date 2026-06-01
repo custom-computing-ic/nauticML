@@ -257,6 +257,15 @@ hls4ml:
   num_mc_samples: ((eval.mc_samples))
   hls_project_dir: <str>
   max_ii: <int>
+  model_params: <int>
+
+  # Power proxy mode. Unset -> run the Vivado power estimator. Set to one of
+  # ff | params | model_proxy to skip Vivado after HLS synthesis and return a
+  # cheap proxy as power/energy instead:
+  #   ff          -> HLS FF estimate (pre_ff)
+  #   params      -> synthesized model parameter count
+  #   model_proxy -> pre_ff**2 * pre_interval_max**0.5
+  proxy: <str>
 
   vivado_timeout: 86400
 
