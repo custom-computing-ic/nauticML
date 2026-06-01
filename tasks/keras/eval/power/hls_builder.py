@@ -24,6 +24,10 @@ class HLSBuilder:
         ctx.hls4ml.max_ii = TestbenchWriter.max_layer_ii(stripped_model, hls_config)
         ctx.log.info(f"max_layer_ii={ctx.hls4ml.max_ii} cycles")
 
+        # Stash the synthesized model's parameter count for the 'params' power
+        # proxy mode (counts the model actually handed to hls4ml).
+        ctx.hls4ml.model_params = int(stripped_model.count_params())
+
         # 2. Pick io_type once; downstream TB writing branches on it.
         io_type = ctx.hls4ml.hls_config.io_type or "io_parallel"
         
