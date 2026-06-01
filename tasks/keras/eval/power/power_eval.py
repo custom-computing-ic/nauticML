@@ -84,7 +84,13 @@ class KerasEnergy:
         return True
 
     @taskx
-    def evaluate_energy(ctx, model):
+    def evaluate_energy(ctx, get_model):
+        """Evaluate dynamic power / energy.
+
+        ``get_model`` is a zero-arg callable that lazily loads the Keras model;
+        it is only invoked on a cache miss, so a cached result avoids loading
+        the checkpoint entirely.
+        """
         try:
             iter_raw = ctx.bayes_opt.iteration
             iter_num = iter_raw.get() if hasattr(iter_raw, "get") else iter_raw
@@ -127,7 +133,7 @@ class KerasEnergy:
                 if shutil.which("vivado") is None:
                     raise RuntimeError("Vivado not found on PATH — skipping power estimation")
 
-                HLSBuilder.build_hls_from_model(ctx, model)
+                HLSBuilder.build_hls_from_model(ctx, get_model())
 
                 if (code := KerasEnergy.run_vivado_power_estimation(ctx)) != 0:
                     raise RuntimeError(f"Vivado power estimation failed with return code: {code}")

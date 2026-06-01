@@ -14,6 +14,8 @@ from tensorflow_model_optimization.python.core.sparsity.keras import pruning_wra
 from tasks.keras.trust.converter.dropout.mc_model import MonteCarloDropoutModel
 
 from tasks.keras.eval.power.power_eval import KerasEnergy
+from tasks.keras.eval.power.power_cache import PowerCache
+from tasks.keras.eval.cache_manager import get_cache
 
 class KerasEval:
 
@@ -25,19 +27,92 @@ class KerasEval:
             "PruneLowMagnitude": pruning_wrapper.PruneLowMagnitude
         }
 
-        model = load_model(ctx.experiment.ckpt_file, custom_objects=co)
-        y_prob = model.predict(ctx.dataset.data["x_test"])
+        cache = get_cache()
 
-        ctx.eval.accuracy = KerasEval.evaluate_accuracy(ctx, y_prob)
-        ctx.eval.ece = KerasEval.evaluate_ece(ctx, y_prob)
-        ctx.eval.ape = KerasEval.evaluate_ape(ctx, model)
-        ctx.eval.flops = KerasEval.evaluate_flops(ctx)
+        # Loading the checkpoint and running predict are the expensive steps, so
+        # defer them until a cache miss actually needs them. A run where every
+        # metric is cached touches neither.
+        state = {"model": None, "y_prob": None}
 
-        KerasEnergy.evaluate_energy(ctx, model)
+        def get_model():
+            if state["model"] is None:
+                state["model"] = load_model(ctx.experiment.ckpt_file, custom_objects=co)
+            return state["model"]
+
+        def get_y_prob():
+            if state["y_prob"] is None:
+                state["y_prob"] = get_model().predict(ctx.dataset.data["x_test"])
+            return state["y_prob"]
+
+        ctx.eval.accuracy = KerasEval._cached(ctx, cache, "accuracy",
+            lambda: KerasEval.evaluate_accuracy(ctx, get_y_prob()))
+        ctx.eval.ece = KerasEval._cached(ctx, cache, "ece",
+            lambda: KerasEval.evaluate_ece(ctx, get_y_prob()))
+        ctx.eval.ape = KerasEval._cached(ctx, cache, "ape",
+            lambda: KerasEval.evaluate_ape(ctx, get_model()))
+        ctx.eval.flops = KerasEval._cached(ctx, cache, "flops",
+            lambda: KerasEval.evaluate_flops(ctx))
+
+        KerasEnergy.evaluate_energy(ctx, get_model)
         # TODO: decouple these evaluations with a map of things to update and the acc function, and do the same in bayes opt for logging
         # TODO: decouple also the pareto frontier
         # TODO: add also latency to the pareto front generated
-        
+
+    @staticmethod
+    def _cached(ctx, cache, metric, compute):
+        """Return the cached metric value, or compute it on a miss and store it."""
+        hit = cache.probe(metric, ctx)
+        if hit is not None:
+            ctx.log.info(f"Using cached {metric}={hit}")
+            return hit
+
+        value = compute()
+        try:
+            cache.write(metric, ctx, value)
+        except Exception as e:
+            ctx.log.warning(f"Failed to write {metric} cache: {e}")
+        return value
+
+    @taskx
+    def probe_cache(ctx):
+        """Populate ctx.eval.* straight from cache for the current BO point.
+
+        Runs right after a Bayesian point is chosen. If *every* metric for this
+        configuration is already cached, the metrics are written onto ctx and
+        ctx.eval.cached is set True so the caller can skip training + evaluation
+        and ask the optimiser for the next point. Otherwise ctx.eval.cached is
+        set False and nothing else is touched.
+        """
+        cache = get_cache()
+
+        accuracy = cache.probe("accuracy", ctx)
+        ece = cache.probe("ece", ctx)
+        ape = cache.probe("ape", ctx)
+        flops = cache.probe("flops", ctx)
+        # Power probe returns both power and energy (or None on a miss). A
+        # previously-failed eval is still a hit (stored as a sentinel) so we
+        # don't pointlessly retrain a configuration that can't be built.
+        power_entry = PowerCache.probe_cache(ctx)
+
+        if None in (accuracy, ece, ape, flops) or power_entry is None:
+            ctx.eval.cached = False
+            return
+
+        ctx.eval.accuracy = accuracy
+        ctx.eval.ece = ece
+        ctx.eval.ape = ape
+        ctx.eval.flops = flops
+        ctx.eval.power = power_entry["power"]
+        ctx.eval.energy = power_entry["energy"]
+        ctx.eval.cached = True
+
+        ctx.log.info(
+            "Full cache hit for this configuration "
+            f"(accuracy={accuracy}, ece={ece}, ape={ape}, flops={flops}, "
+            f"power={power_entry['power']}, energy={power_entry['energy']}); "
+            "skipping train + eval"
+        )
+
     def evaluate_ece(ctx, y_prob) -> float:
         y_logits    = np.log(y_prob/(1-y_prob + 1e-15))
 
