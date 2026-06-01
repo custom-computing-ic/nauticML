@@ -4,6 +4,8 @@ from tasks.strategy.strategy import Strategy
 
 class BayesOpt:
 
+    SCORE_PENALTY = -1e6
+
     @taskx
     def initialise_bayesian_opt(ctx):
         bo = ctx.bayes_opt
@@ -75,6 +77,28 @@ class BayesOpt:
         for key, value in metric_values.items():
             bo.control.params['values'][key].set(value)
 
+    @taskx
+    def show_best_parameters(ctx):
+        bo = ctx.bayes_opt
+        log = ctx.log
+        best_summary = max(bo.summary, key=lambda x: x["metrics"]["score"])
+
+        params = best_summary["hyperparameters"]
+        log.info(
+        f"""Final parameters:
+                droupout rate: {params["dropout_rate"]}
+                p rate: {params["p_rate"]}
+                scale factor: {params["scale_factor"]}
+                num bayes later: {params["num_bayes_layer"]}""")
+
+        metrics = best_summary["metrics"]
+        log.info(
+        f"""With performance metrics:
+                ece: {metrics["ece"]}
+                ape: {metrics["ape"]}
+                accuracy: {metrics["accuracy"]}
+                flops: {metrics["flops"]}""")
+
     # Records current iteration suggest into a summary
     @staticmethod
     def record_iteration(bo, engine, log):
@@ -83,13 +107,35 @@ class BayesOpt:
             'iteration': bo.iteration
         }
 
+        is_penalised = False
         metric_values = {}
         for metric in bo.metrics.model_fields:
             metric_value = getattr(bo.metrics, metric).get()
+
+            # If we cannot evaluate this metric, flag the run as penalised but
+            # keep iterating so every metric is recorded (as None where missing).
+            # The score gets overridden to SCORE_PENALTY below; preserving the
+            # per-metric breakdown is what lets us tell *which* metric died.
+            if metric_value is None:
+                is_penalised = True
+                metric_values[metric] = None
+                continue
+
+            metric_values[metric] = round(metric_value, 4)
+
             curr_metric_params = getattr(bo.curr_strategy, metric)
 
+            # If we don't satisfy the minimum or maximum constraints, we have the worst possible score
+            if "min" in curr_metric_params.model_fields.keys():
+                is_penalised = metric_value < curr_metric_params.min
+
+            if "max" in curr_metric_params.model_fields.keys():
+                is_penalised = metric_value > curr_metric_params.max
+
             score += float(metric_value / curr_metric_params.base) * float(curr_metric_params.weight)
-            metric_values[metric] = round(metric_value, 4)
+
+        if is_penalised:
+            score = BayesOpt.SCORE_PENALTY
 
         metric_values["score"] = score
         summary["metrics"] = metric_values
@@ -99,7 +145,7 @@ class BayesOpt:
         summary["hyperparameters"] = BayesOpt.suggest_to_values(bo)
             
         bo.summary.append(summary)
-        log.artifact(key=f'bayes-iteration-summary-strategy-{bo.curr_strategy.name}'.lower(),
+        log.artifact(key=f'bayes-iteration-{bo.iteration}-summary-strategy-{bo.curr_strategy.name}'.lower(),
                     table=bo.summary)
 
         engine.register(params=bo.control.suggests,
@@ -115,21 +161,3 @@ class BayesOpt:
             hyperparams[key] = bo.control.params['space'][key][idx]
 
         return hyperparams       
-       
-       
-        # # Create a table artifact
-        # create_table_artifact(
-        #     key=f"bayes-iteration-{cfg.bayes_opt.iteration}",
-        #     table=[
-        #         {
-        #             "Iteration": cfg.bayes_opt.iteration,
-        #             "Previous Score": round(cfg.bayes_opt.score, 4) if cfg.bayes_opt.score is not None else "N/A",
-        #             "Dropout Rate": cfg.model.dropout_rate,
-        #             "P Rate": cfg.model.p_rate,
-        #             "Bayes Layers": cfg.model.num_bayes_layer,
-        #             "Scale Factor": cfg.model.scale_factor
-        #         }
-        #     ],
-        #     description="Bayesian Optimization Step Summary"
-        # )
-        # return cfg

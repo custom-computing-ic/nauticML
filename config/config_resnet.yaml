@@ -4,7 +4,8 @@ experiment:
   seed: 42
   save_dir: ./prj/exp_cifar_bayes_resnet
   save_model: cifar_resnet_tmp_3bayeslayer_mc
-  gpus: [0, 1]
+  # cpu: True
+  gpus: [2]
   ckpt_file: best_chkp.tf
 
 dataset:
@@ -26,18 +27,24 @@ model:
 
 # NOTE: introduce typing so that we can type dictionaries too
 S1:
-  accuracy: 
+  accuracy:
     weight: 0.25
     base: 0.99
-  ece: 
+  ece:
     weight: -0.25
     base: 0.03
-  ape: 
+  ape:
     weight: 0.25
     base: 1.5
-  flops: 
+  flops:
     weight: -0.25
     base: 5340192
+  power:
+    weight: 0.00
+    base: 2.0
+  energy:
+    weight: 0.00
+    base: 1000000
 
   top_n: 3
   # special metric calculated from the other metrics
@@ -46,26 +53,134 @@ S1:
   name: Balance
 
 S2:
-  accuracy: 
+  accuracy:
     weight: 0.75
-    base: 0.99
-  ece: 
+    base: 0.92
+  ece:
     weight: 0.00
-    base: 0.03
-  ape: 
+    base: 0.09
+  ape:
     weight: 0.00
-    base: 1.5
-  flops: 
+    base: 1.8
+  flops:
     weight: -0.25
-    base: 5340192
+    base: 1112422588
+  power:
+    weight: 0.00
+    base: 2.0
+  energy:
+    weight: 0.00
+    base: 1000000
 
   top_n: 1
   top_metric: flops
 
   name: Opt-Efficiency
-  
+
+S6:
+  accuracy:
+    weight: 0.166
+    base: 0.99
+  ece:
+    weight: -0.166
+    base: 0.03
+  ape:
+    weight: 0.166
+    base: 1.5
+  flops:
+    weight: -0.166
+    base: 5340192
+  power:
+    weight: -0.166
+    base: 1.0
+  energy:
+    weight: -0.166
+    base: 500000
+
+  top_n: 3
+  name: Opt-Balanced
+
+S7:
+  accuracy:
+    weight: 0.00
+    base: 0.92
+    min: 0.85
+  ece:
+    weight: 0.00
+    base: 0.09
+  ape:
+    weight: 0.00
+    base: 1.8
+  flops:
+    weight: 0.00
+    base: 1112422588
+  power:
+    weight: -1.00
+    base: 2.0
+  energy:
+    weight: 0.00
+    base: 1000000
+
+  top_n: 1
+  name: Opt-Power
+
+S8:
+  accuracy:
+    weight: 0.00
+    base: 0.92
+    min: 0.85
+  ece:
+    weight: 0.00
+    base: 0.09
+  ape:
+    weight: 0.00
+    base: 1.8
+  flops:
+    weight: 0.00
+    base: 1112422588
+  power:
+    weight: 0.00
+    base: 2.0
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Base ~1M is the order of magnitude for ResNet18 at scale_factor=0.3,
+  # RF=4500, mc_samples=10.
+  energy:
+    weight: -1.00
+    base: 1000000
+
+  top_n: 1
+  name: Opt-Energy
+
+S9:
+  accuracy:
+    weight: 0.20
+    base: 0.99
+    min: 0.95
+  ece:
+    weight: -0.20
+    base: 0.03
+  ape:
+    weight: 0.20
+    base: 1.5
+  flops:
+    weight: -0.20
+    base: 5340192
+  power:
+    weight: -0.20
+    base: 1.0
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: 0.00
+    base: 500000
+
+  top_n: 3
+  name: Opt-Power-Balanced
+
+
 strategy:
-  strategies: [ S1 ]
+  strategies: [ S6 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -80,14 +195,14 @@ bayes_opt:
   engine: <obj>
   score: <float>
   summary: <list>
-  
+
   curr_strategy: <obj>
 
   control:
     params: dict
     suggests: dict
 
-  num_iter: 2
+  num_iter: 15
   seed: ((experiment.seed))
   tunable:
     dropout_rate:
@@ -111,6 +226,8 @@ bayes_opt:
     ece: ((eval.ece))
     ape: ((eval.ape))
     flops: ((eval.flops))
+    power: ((eval.power))
+    energy: ((eval.energy))
 
 train:
   optimizer: <obj>
@@ -125,10 +242,37 @@ eval:
   ape: <float>
   accuracy: <float>
   flops: <float>
+  power: <float>
+  energy: <float>
 
   mc_samples: 10
   num_eval_images: 200
   num_bins: 10
+
+# hls4ml energy estimation config
+hls4ml:
+  num_mc_samples: ((eval.mc_samples))
+  hls_project_dir: <str>
+  max_ii: <int>
+
+  vivado_timeout: 86400
+
+  power_mode: # vectorless, saif_synth, saif_impl in order of refined accuracy. saif modes need num_samples
+    mode: "saif_synth"
+    num_samples: 6
+
+  hls_config:
+    precision: "ap_fixed<16,6>"       # HEART 2025 §5.1: 16-bit, 6 integer bits
+    strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
+    io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
+    clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
+    fpga_part: "xczu7ev-ffvc1156-2-e" # Kintex UltraScale KU115 (HEART 2025 Table 5)
+    # Pinned flat across the worst Dense/Conv layer so max(RF) stays constant
+    # across DSE iterations. Must be >= every layer's min: at scale_factor=0.95,
+    # the deepest ResNet18 block (8 × int(64*0.95) channels) needs
+    # >= 3*3*8*60 = 4320 for the io_stream Resource constraint. 4500 covers
+    # up to scale_factor=0.95 with a small margin.
+    reuse_factor: 4500
 
 
 reporter:
@@ -143,3 +287,5 @@ reporter:
     - ece
     - ape
     - score
+    - power
+    - energy

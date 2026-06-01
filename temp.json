@@ -1,0 +1,138 @@
+{
+  "Model": {
+    "Precision": "ap_fixed<16,6>",
+    "ReuseFactor": 1,
+    "Strategy": "Resource",
+    "BramFactor": 1000000000,
+    "TraceOutput": false,
+    "ConvImplementation": "LineBuffer"
+  },
+  "LayerName": {
+    "conv2d_1_input": {
+      "Trace": false,
+      "Precision": {
+        "result": "auto"
+      }
+    },
+    "conv2d_1": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "weight": "auto",
+        "bias": "auto",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 25
+    },
+    "conv2d_1_linear": {
+      "Trace": false,
+      "Precision": {
+        "result": "auto"
+      }
+    },
+    "relu1": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "max_pooling2d": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "conv2d_2": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "weight": "auto",
+        "bias": "auto",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 300
+    },
+    "conv2d_2_linear": {
+      "Trace": false,
+      "Precision": {
+        "result": "auto"
+      }
+    },
+    "relu2": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "max_pooling2d_1": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "flatten": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "fc_1": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "weight": "auto",
+        "bias": "auto",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "fc_1_linear": {
+      "Trace": false,
+      "Precision": {
+        "result": "auto"
+      }
+    },
+    "relu3": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "fc_2": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "weight": "auto",
+        "bias": "auto",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    },
+    "fc_2_linear": {
+      "Trace": false,
+      "Precision": {
+        "result": "auto"
+      }
+    },
+    "softmax": {
+      "Trace": false,
+      "Precision": {
+        "result": "ap_fixed<16,6>",
+        "accum": "ap_fixed<16,6>"
+      },
+      "ReuseFactor": 1
+    }
+  }
+}

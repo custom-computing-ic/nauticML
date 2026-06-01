@@ -1,5 +1,5 @@
 from logic.converter.keras.nn2bnn import HlsLayer, _convert_model, strategy_fn
-from .inference_layer import InferenceDropoutLayer
+from .inference_layer import BayesianDropout
 import tensorflow as tf
 
 
@@ -14,7 +14,7 @@ class MonteCarloDropoutModel(HlsLayer):
       strategy, seed, input, **kwargs):
       super().__init__()
       self.original_model = model
-      supported_layers = strategy_fn[strategy](model, InferenceDropoutLayer, **kwargs)
+      supported_layers = strategy_fn[strategy](model, BayesianDropout, **kwargs)
       print(f"Converting model to BayesianDropout: {nSamples}, {p}, {num}, {strategy}, {seed}, {input}, {kwargs}")
 
       if num > 0:

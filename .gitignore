@@ -1,3 +1,5 @@
 logs/
 prj/
 __pycache__/
+.vscode/
+libdevice.10.bc

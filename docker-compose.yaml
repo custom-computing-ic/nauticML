@@ -9,7 +9,8 @@ services:
       - pgdata:/var/lib/postgresql/data
 
   prefect-server:
-    image: prefecthq/prefect:3.4.6-python3.11  # Use latest compatible version
+    # image: prefecthq/prefect:3.4.6-python3.11  # Use latest compatible version
+    image: prefecthq/prefect:3.6.17-python3.11
     depends_on:
       - db
     volumes:
