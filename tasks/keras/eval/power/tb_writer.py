@@ -325,7 +325,7 @@ class TestbenchWriter:
         try:
             with tf.device(dev.current_device()):
                 y_sample = stripped_model.predict(x_sample)
-        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError):
+        except dev.GPU_ERRORS:
             dev.fallback_to_cpu(getattr(ctx, "log", None))
             with tf.device(dev.CPU):
                 y_sample = stripped_model.predict(x_sample)

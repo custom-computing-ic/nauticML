@@ -19,6 +19,17 @@ from tensorflow.keras import backend as K
 GPU = "/GPU:0"
 CPU = "/CPU:0"
 
+# The family of TF errors a contended/held shared GPU raises: OOM
+# (ResourceExhausted), generic device failures (Internal), Grappler/session
+# creation failures (Unknown — "Failed to create session"), and uninitialised
+# state (FailedPrecondition). Callers catch these to degrade to CPU uniformly.
+GPU_ERRORS = (
+    tf.errors.ResourceExhaustedError,
+    tf.errors.InternalError,
+    tf.errors.UnknownError,
+    tf.errors.FailedPreconditionError,
+)
+
 # Retry policy for grabbing a busy GPU on the shared machine.
 GPU_ACQUIRE_ATTEMPTS = 3
 GPU_ACQUIRE_SLEEP_S = 10

@@ -58,7 +58,7 @@ class KerasEval:
             try:
                 with tf.device(dev.current_device()):
                     return predict_call(get_model())
-            except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
+            except dev.GPU_ERRORS as e:
                 if dev.current_device() == dev.CPU:
                     raise
                 ctx.log.warning(

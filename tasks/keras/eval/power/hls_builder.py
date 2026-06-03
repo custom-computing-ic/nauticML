@@ -440,34 +440,52 @@ class HLSBuilder:
         project_cpp = project_dir / "firmware" / "myproject.cpp"
 
         if not params_h.exists() or not project_cpp.exists():
+            log.warning(
+                "patch_dataflow_weights: parameters.h or myproject.cpp missing "
+                f"under {project_dir}; 214-113 fix not applied"
+            )
             return
 
         params_text = params_h.read_text()
         weight_lines = []
         cleaned_params_lines = []
         for line in params_text.splitlines(keepends=True):
-            if line.strip().startswith('#include') and '/weights/' in line:
+            # hls4ml emits weight/bias headers as `#include "weights/w2.h"` —
+            # the substring is `weights/`, NOT `/weights/` (no leading slash),
+            # so matching '/weights/' silently catches nothing.
+            if line.strip().startswith('#include') and 'weights/' in line:
                 weight_lines.append(line)
             else:
                 cleaned_params_lines.append(line)
 
-        if not weight_lines:
-            return
-
         cpp_text = project_cpp.read_text()
-        if '#pragma HLS DATAFLOW' not in cpp_text:
+        # Match the DATAFLOW pragma regardless of its leading indentation so the
+        # insertion can't silently miss because of a whitespace mismatch.
+        pragma_re = re.compile(r'^([ \t]*)#pragma HLS DATAFLOW', re.MULTILINE)
+        match = pragma_re.search(cpp_text)
+
+        if not weight_lines:
+            log.warning(
+                "patch_dataflow_weights: no weight #include lines found in "
+                "parameters.h (expected `#include \"weights/...\"`); "
+                "214-113 dataflow fix not applied"
+            )
+            return
+        if not match:
+            log.warning(
+                "patch_dataflow_weights: no `#pragma HLS DATAFLOW` in "
+                "myproject.cpp; 214-113 fix not applied"
+            )
             return
 
         params_h.write_text(''.join(cleaned_params_lines))
 
-        weight_block = ''.join('    ' + l.lstrip() for l in weight_lines)
-        cpp_text = cpp_text.replace(
-            '    #pragma HLS DATAFLOW',
-            weight_block + '    #pragma HLS DATAFLOW',
-        )
+        indent = match.group(1)
+        weight_block = ''.join(f"{indent}{l.lstrip()}" for l in weight_lines)
+        cpp_text = cpp_text[:match.start()] + weight_block + cpp_text[match.start():]
         project_cpp.write_text(cpp_text)
 
         log.info(
             f"Moved {len(weight_lines)} weight #include(s) from parameters.h "
-            f"into myproject.cpp function body for DATAFLOW compliance"
+            f"into myproject.cpp before #pragma HLS DATAFLOW for 214-113 compliance"
         )

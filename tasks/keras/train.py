@@ -29,7 +29,7 @@ def _fit_with_cpu_fallback(ctx, fit_fn):
         try:
             with tf.device(dev.GPU):
                 return fit_fn(ctx.model.logic)
-        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
+        except dev.GPU_ERRORS as e:
             log.warning(
                 f"GPU training failed ({type(e).__name__}: {e}). "
                 "Falling back to CPU for this iteration."
