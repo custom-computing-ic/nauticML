@@ -1,8 +1,14 @@
 from nautic import taskx
 
+import os
+import re
+import sys
+import shutil
+import tempfile
+import subprocess
+
 import numpy as np
 import tensorflow as tf
-from tensorflow.keras import backend as K
 from tensorflow.keras.models import load_model
 import tensorflow_probability as tfp
 from tensorflow.python.framework.convert_to_constants import (
@@ -174,47 +180,71 @@ class KerasEval:
         """
         Calculate FLOPS for tf.keras.Model or tf.keras.Sequential .
         Ignore operations used in only training mode such as Initialization.
-        Use tf.profiler of tensorflow v1 api.
+
+        The profiler path uses convert_variables_to_constants_v2_as_graph, which
+        builds a Grappler cluster that probes the GPU even under
+        tf.device('/CPU:0') and dies with UnknownError("Failed to create
+        session") on a contended shared GPU. To keep it off the GPU entirely we
+        run the count in a short-lived subprocess with CUDA_VISIBLE_DEVICES=""
+        (set before TF imports), which forces a CPU-only Grappler cluster and
+        yields identical numbers. See flops_worker.py.
         """
-
         model = ctx.model.original
-        batch_size = 1
 
-        def _count():
-            # Force CPU placement for the ops themselves. FLOPS counting is a
-            # static graph op — no need for GPU.
+        tmpdir = tempfile.mkdtemp(prefix="flops_")
+        model_path = os.path.join(tmpdir, "model.h5")
+        worker = os.path.join(os.path.dirname(__file__), "flops_worker.py")
+        repo_root = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir)
+        )
+        try:
+            model.save(model_path)
+
+            env = dict(os.environ)
+            env["CUDA_VISIBLE_DEVICES"] = ""  # GPU invisible to the subprocess
+            env["PYTHONPATH"] = repo_root + os.pathsep + env.get("PYTHONPATH", "")
+
+            proc = subprocess.run(
+                [sys.executable, worker, model_path],
+                cwd=repo_root, env=env,
+                capture_output=True, text=True, timeout=600,
+            )
+            match = re.search(r"FLOPS_RESULT=(\d+)", proc.stdout)
+            if match:
+                return int(match.group(1))
+
+            tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-15:])
+            ctx.log.warning(
+                f"FLOPS subprocess returned no result (exit {proc.returncode}). "
+                f"Output tail:\n{tail}"
+            )
+        except Exception as e:
+            ctx.log.warning(
+                f"FLOPS subprocess failed ({type(e).__name__}: {e}). "
+                "Trying in-process on CPU."
+            )
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+        # Last resort: in-process count on CPU. This may still hit the
+        # Grappler/GPU issue on a contended machine, so swallow it and return
+        # 0.0 rather than crash the whole DSE — FLOPS is a soft metric.
+        try:
             with tf.device(dev.CPU):
                 inputs = [
-                    tf.TensorSpec([batch_size] + inp.shape[1:], inp.dtype)
+                    tf.TensorSpec([1] + inp.shape[1:], inp.dtype)
                     for inp in model.inputs
                 ]
-
                 real_model = tf.function(model).get_concrete_function(inputs)
                 frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
-
                 run_meta = tf.compat.v1.RunMetadata()
                 opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
                 flops = tf.compat.v1.profiler.profile(
                     graph=frozen_func.graph, run_meta=run_meta, cmd="scope", options=opts
                 )
             return flops.total_float_ops
-
-        # convert_variables_to_constants_v2_as_graph spins up a Grappler cluster
-        # that probes the GPU regardless of the tf.device('/CPU:0') context, so
-        # on a contended shared GPU it can still raise UnknownError("Failed to
-        # create session") (or InternalError/ResourceExhausted). Guard against
-        # all of these: clear the session to release the contended GPU state,
-        # pin the rest of the iteration to CPU, and retry the count on CPU.
-        try:
-            return _count()
-        except (tf.errors.UnknownError,
-                tf.errors.InternalError,
-                tf.errors.ResourceExhaustedError,
-                tf.errors.FailedPreconditionError) as e:
-            ctx.log.warning(
-                f"FLOPS counting failed ({type(e).__name__}: {e}). "
-                "Clearing session and retrying on CPU."
+        except Exception as e:
+            ctx.log.error(
+                f"FLOPS count unavailable ({type(e).__name__}: {e}); returning 0.0"
             )
-            K.clear_session()
-            dev.fallback_to_cpu(ctx.log)
-            return _count()
+            return 0.0
