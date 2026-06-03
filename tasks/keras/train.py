@@ -2,7 +2,6 @@ import os
 import shutil
 
 import tensorflow as tf
-from tensorflow.keras import backend as K
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.callbacks import ModelCheckpoint
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_callbacks
@@ -11,36 +10,38 @@ from nautic import taskx
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 from tasks.keras.svhn.utils import CosineAnnealingScheduler
-
-
-def _switch_to_cpu(log):
-    """Release GPU memory and make subsequent TF ops run on CPU."""
-    K.clear_session()
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    try:
-        tf.config.set_visible_devices([], 'GPU')
-    except RuntimeError as e:
-        # set_visible_devices fails if devices have already been initialized;
-        # the tf.device('/CPU:0') wrapper below still forces CPU placement.
-        log.warning(f"Could not hide GPUs after init: {e}")
+from tasks.keras import device as dev
 
 
 def _fit_with_cpu_fallback(ctx, fit_fn):
-    """Run fit_fn(model); on GPU OOM, rebuild the model on CPU and retry."""
+    """Train this iteration on a GPU if one can be acquired, otherwise on CPU.
+
+    On the shared machine the chosen GPU may be busy, so ``dev.acquire_device``
+    retries it before giving up. The device it settles on is recorded so
+    evaluation in the same iteration runs there too. If the GPU can't be
+    acquired — or a GPU run dies with OOM — we fall back to CPU *for this
+    iteration only*; the next iteration is free to try the GPU again.
+    """
     log = ctx.log
-    try:
+    device = dev.acquire_device(log)
+
+    if device == dev.GPU:
+        try:
+            with tf.device(dev.GPU):
+                return fit_fn(ctx.model.logic)
+        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
+            log.warning(
+                f"GPU training failed ({type(e).__name__}: {e}). "
+                "Falling back to CPU for this iteration."
+            )
+            dev.fallback_to_cpu(log)
+
+    # CPU path: rebuild the model so its variables live on CPU, then fit there.
+    # Local import to avoid a circular import at module load.
+    from tasks.keras.model_factory import KerasModels
+    with tf.device(dev.CPU):
+        KerasModels.get_model(ctx)
         return fit_fn(ctx.model.logic)
-    except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
-        log.warning(
-            f"GPU training failed ({type(e).__name__}: {e}). "
-            "Falling back to CPU."
-        )
-        _switch_to_cpu(log)
-        # Local import to avoid a circular import at module load.
-        from tasks.keras.model_factory import KerasModels
-        with tf.device('/CPU:0'):
-            KerasModels.get_model(ctx)
-            return fit_fn(ctx.model.logic)
 
 class KerasTrain:
     @taskx

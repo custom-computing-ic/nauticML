@@ -61,20 +61,15 @@ class KerasExperiment:
 
                 # On the shared accelerator hardware the selected GPU may be
                 # visible but unusable (out of memory, driver contention, etc.).
-                # Probe it now — a tiny matmul forces device init and Grappler
-                # cluster creation, the same paths that later blow up deep in
-                # training/eval. If the probe fails, fall back to CPU upfront
-                # rather than crashing mid-pipeline. After set_visible_devices
-                # the selected GPUs are remapped to /GPU:0.. in TF's view.
-                try:
-                    with tf.device('/GPU:0'):
-                        _ = tf.matmul(tf.ones((8, 8)), tf.ones((8, 8))).numpy()
-                except Exception as probe_err:
-                    log.warning(
-                        f"⚠️ GPU probe failed ({type(probe_err).__name__}: {probe_err}). "
-                        "Falling back to CPU for this run."
-                    )
-                    return configure_gpus(True, [])
+                # We no longer probe-and-fall-back to CPU here: the GPU is only
+                # made visible now (after set_visible_devices it is remapped to
+                # /GPU:0 in TF's view). Actually acquiring it is deferred to
+                # each iteration's training, where it is retried before any CPU
+                # fallback — see tasks/keras/device.py (acquire_device) and
+                # _fit_with_cpu_fallback in train.py. This avoids permanently
+                # dropping to CPU just because the shared GPU happened to be
+                # busy at startup, and lets each iteration retry the GPU.
+                log.info("ℹ️ GPU acquisition deferred to training time (with retries).")
             else:
                 log.warning("⚠️ CPU used by default as no CPU or GPU indices provided are empty")
                 return configure_gpus(True, [])
