@@ -2,6 +2,7 @@ from nautic import taskx
 
 import numpy as np
 import tensorflow as tf
+from tensorflow.keras import backend as K
 from tensorflow.keras.models import load_model
 import tensorflow_probability as tfp
 from tensorflow.python.framework.convert_to_constants import (
@@ -177,27 +178,43 @@ class KerasEval:
         """
 
         model = ctx.model.original
+        batch_size = 1
 
-        batch_size = None
-        if batch_size is None:
-            batch_size = 1
+        def _count():
+            # Force CPU placement for the ops themselves. FLOPS counting is a
+            # static graph op — no need for GPU.
+            with tf.device(dev.CPU):
+                inputs = [
+                    tf.TensorSpec([batch_size] + inp.shape[1:], inp.dtype)
+                    for inp in model.inputs
+                ]
 
-        # Force CPU placement: convert_variables_to_constants_v2_as_graph spins
-        # up a Grappler cluster which on the shared accelerator hardware can
-        # fail with UnknownError("Failed to create session") if the GPU is
-        # contended. FLOPS counting is a static graph op — no need for GPU.
-        with tf.device('/CPU:0'):
-            inputs = [
-                tf.TensorSpec([batch_size] + inp.shape[1:], inp.dtype) for inp in model.inputs
-            ]
+                real_model = tf.function(model).get_concrete_function(inputs)
+                frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
 
-            real_model = tf.function(model).get_concrete_function(inputs)
-            frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
+                run_meta = tf.compat.v1.RunMetadata()
+                opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
+                flops = tf.compat.v1.profiler.profile(
+                    graph=frozen_func.graph, run_meta=run_meta, cmd="scope", options=opts
+                )
+            return flops.total_float_ops
 
-            run_meta = tf.compat.v1.RunMetadata()
-            opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
-            flops = tf.compat.v1.profiler.profile(
-                graph=frozen_func.graph, run_meta=run_meta, cmd="scope", options=opts
+        # convert_variables_to_constants_v2_as_graph spins up a Grappler cluster
+        # that probes the GPU regardless of the tf.device('/CPU:0') context, so
+        # on a contended shared GPU it can still raise UnknownError("Failed to
+        # create session") (or InternalError/ResourceExhausted). Guard against
+        # all of these: clear the session to release the contended GPU state,
+        # pin the rest of the iteration to CPU, and retry the count on CPU.
+        try:
+            return _count()
+        except (tf.errors.UnknownError,
+                tf.errors.InternalError,
+                tf.errors.ResourceExhaustedError,
+                tf.errors.FailedPreconditionError) as e:
+            ctx.log.warning(
+                f"FLOPS counting failed ({type(e).__name__}: {e}). "
+                "Clearing session and retrying on CPU."
             )
-
-        return flops.total_float_ops
+            K.clear_session()
+            dev.fallback_to_cpu(ctx.log)
+            return _count()
