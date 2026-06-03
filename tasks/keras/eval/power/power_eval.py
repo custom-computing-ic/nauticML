@@ -266,7 +266,7 @@ class KerasEnergy:
                 raise ValueError(
                     "proxy 'model_proxy': missing pre_ff/pre_interval_max in csynth report"
                 )
-            return float(pre_ff) ** 2 * float(pre_interval_max) ** 0.5
+            return (float(pre_ff) / 460800) ** 2 * float(pre_interval_max) ** 0.5
 
         raise ValueError(f"Unknown proxy mode: {mode!r}")
 

@@ -4,8 +4,8 @@ experiment:
   seed: 42
   save_dir: ./prj/exp_cifar_bayes_resnet
   save_model: cifar_resnet_tmp_3bayeslayer_mc
-  # cpu: True
-  gpus: [2]
+  cpu: True
+  # gpus: [2]
   ckpt_file: best_chkp.tf
 
 dataset:
@@ -178,9 +178,35 @@ S9:
   top_n: 3
   name: Opt-Power-Balanced
 
+S11:
+  accuracy:
+    weight: 0.00
+    base: 0.99
+    min: 0.85
+  ece:
+    weight: -0.50
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 5340192
+  power:
+    weight: 0.50
+    base: 1.80
+  # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
+  # Proportional to joules at fixed clock_period. Base ~500k is the order
+  # of magnitude for LeNet at scale_factor=0.3, RF=500, mc_samples=5.
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Confidence-Power
 
 strategy:
-  strategies: [ S6 ]
+  strategies: [ S7 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -202,7 +228,7 @@ bayes_opt:
     params: dict
     suggests: dict
 
-  num_iter: 15
+  num_iter: 300
   seed: ((experiment.seed))
   tunable:
     dropout_rate:

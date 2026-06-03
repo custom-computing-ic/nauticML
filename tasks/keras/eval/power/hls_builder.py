@@ -74,7 +74,7 @@ class HLSBuilder:
         # against the widths truly synthesized, not just what we requested.
         from tasks.keras.eval.power.read_resolved_accums import read_resolved_accums
         resolved = read_resolved_accums(hls_model)
-        ctx.hls4ml.resolved_precision = resolved
+        # ctx.hls4ml.resolved_precision = resolved
         if resolved:
             ctx.log.info(
                 "resolved accums: "

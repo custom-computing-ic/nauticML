@@ -1,0 +1,97 @@
+---
+
+experiment:
+  seed: 42
+  save_dir: ./prj/exp_mnist_bayes_lenet_try
+  save_model: mnist_bayes_lenet_10samples_mc
+  cpu: True
+  ckpt_file: best_chkp.tf
+  id: 0
+
+dataset:
+  name: mnist
+  data: <dict>
+  mean: 0.0
+  std: 1.0
+
+model:
+  original: <obj>
+  logic: <obj>
+  name: lenet
+  is_quant: false
+  p_rate: 0.6
+  scale_factor: 0.5
+  dropout_rate: 0.05
+  dropout_type: mc
+  num_bayes_layer: 1
+
+train:
+  optimizer: <obj>
+  id: ((experiment.id))
+  num_epoch: 3
+  batch_size: 128
+  learning_rate: 0.01
+  validation_split: 0.1
+
+eval:
+  ece: <float>
+  ape: <float>
+  accuracy: <float>
+  flops: <float>
+  power: <float>
+  energy: <float>
+
+  # set True by eval.probe_cache when the whole point is already cached
+  cached: <bool>
+
+  mc_samples: 5
+  num_eval_images: 200
+  num_bins: 10
+
+# hls4ml energy estimation config
+hls4ml:
+  num_mc_samples: ((eval.mc_samples))
+  hls_project_dir: <str>
+
+  max_ii: <int>
+  model_params: <int>
+  # Power proxy mode. Unset -> run the Vivado power estimator. Set to one of
+  # ff | params | model_proxy to skip Vivado after HLS synthesis and return a
+  # cheap proxy as power/energy instead:
+  #   ff          -> HLS FF estimate (pre_ff)
+  #   params      -> synthesized model parameter count
+  #   model_proxy -> pre_ff**2 * pre_interval_max**0.5
+  # proxy: "model_proxy"
+
+  vivado_timeout: 86400
+
+  power_mode: # three modes, vectorless, saif_synth and saif_impl in terms of refined accuracy. saif ones need also num_samples
+    mode: "saif_synth"
+    num_samples: 6
+
+  hls_config:
+    precision: "ap_fixed<16,6>"       # HEART 2025 §5.1: 16-bit, 6 integer bits
+    strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
+    io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
+    clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
+    fpga_part: "xczu7ev-ffvc1156-2-e" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
+    # Pinned flat across all Dense/Conv layers so max(RF) stays constant
+    # across DSE iterations (architecture varies but RF doesn't). Must be
+    # >= every layer's min: at scale_factor=0.95, conv2d_2 needs >= 5*5*19=475
+    # for the io_stream Resource constraint. 500 covers up to scale_factor=1.0.
+    reuse_factor: 500
+  
+
+reporter:
+  log:
+    - dropout_rate_list
+    - p_rate
+    - num_bayes_layer
+    - scale_factor
+    - accuracy
+    - flops
+    - ece
+    - ape
+    - score
+    - power
+    - energy
