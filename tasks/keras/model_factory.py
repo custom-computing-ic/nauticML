@@ -9,6 +9,8 @@ from tensorflow.keras.models import clone_model
 from tasks.keras.models.lenet import LeNet
 from nautic import taskx
 from tasks.keras.models.resnet import ResNet18
+from tasks.keras.models.jet import Jet
+from tasks.keras.models.tracking import ParticleTracking
 
 class KerasModels:
     @taskx
@@ -27,7 +29,9 @@ class KerasModels:
 
         factory_nquant = {
             "lenet": LeNet,
-            "resnet": ResNet18
+            "resnet": ResNet18,
+            "jet": Jet,
+            "tracking": ParticleTracking
         }
 
         if ctx.model.is_quant:
@@ -65,7 +69,9 @@ class KerasModels:
             if isinstance(layer, tf.keras.layers.Conv2D):
                 return tfmot.sparsity.keras.prune_low_magnitude(layer, **pruning_params)
 
-            if isinstance(layer, tf.keras.layers.Dense) and layer.name != 'fc_2': # exclude output_dense
+            # Exclude the classification head from pruning. LeNet names it
+            # 'fc_2'; Jet/ParticleTracking name it 'output'.
+            if isinstance(layer, tf.keras.layers.Dense) and layer.name not in ('fc_2', 'output'):
                 return tfmot.sparsity.keras.prune_low_magnitude(layer, **pruning_params)
             return layer
 

@@ -1,0 +1,383 @@
+---
+
+experiment:
+  seed: 42
+  save_dir: ./prj/exp_jet_bayes
+  save_model: jet_bayes_mc
+  cpu: True
+  ckpt_file: best_chkp.tf
+
+dataset:
+  name: jets
+  data: <dict>
+  # Features are StandardScaler-normalised (mean 0, std 1), so the APE noise
+  # generator in eval.py draws from N(0, 1) to match the input distribution.
+  mean: 0.0
+  std: 1.0
+
+model:
+  original: <obj>
+  logic: <obj>
+  name: jet
+  is_quant: false
+  dropout_rate: 0.4
+  p_rate: 0.05
+  scale_factor: 1.0        # 1.0 == canonical 16->64->32->32->5 (~4,389 params)
+  dropout_type: mc
+  num_bayes_layer: 3
+
+# flops base below is the float-op count of the scale_factor=1.0 model
+# (2 x MACs = 2 x (16*64 + 64*32 + 32*32 + 32*5) = 8512). It is only a
+# normalisation reference for the strategy scores.
+
+S1:
+  accuracy:
+    weight: 0.00
+    base: 0.80
+    min: 0.70
+  ece:
+    weight: 0.00
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: -1.00
+    base: 8512
+  power:
+    weight: 0.00
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 1
+  name: Opt-Efficiency
+
+S2:
+  accuracy:
+    weight: 1
+    base: 0.80
+  ece:
+    weight: 0.00
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 8512
+    min: 2000
+  power:
+    weight: 0.00
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 1
+  name: Opt-Accuracy
+
+S3:
+  accuracy:
+    weight: 0.00
+    base: 0.80
+    min: 0.70
+  ece:
+    weight: -1.00
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 8512
+    min: 2000
+  power:
+    weight: 0.00
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 1
+  name: Opt-Confidence
+
+S4:
+  accuracy:
+    weight: 0.50
+    base: 0.80
+  ece:
+    weight: -0.50
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 8512
+  power:
+    weight: 0.00
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 1
+  name: Opt-Confidence-Accuracy
+
+S5:
+  accuracy:
+    weight: 0.00
+    base: 0.80
+  ece:
+    weight: -0.50
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: -0.50
+    base: 8512
+  power:
+    weight: 0.00
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 1
+  name: Opt-Confidence-Efficiency
+
+S6:
+  accuracy:
+    weight: 0.166
+    base: 0.80
+  ece:
+    weight: -0.166
+    base: 0.03
+  ape:
+    weight: 0.166
+    base: 1.5
+  flops:
+    weight: -0.166
+    base: 8512
+  power:
+    weight: -0.166
+    base: 1.80
+  energy:
+    weight: -0.166
+    base: 800000
+
+  top_n: 3
+  name: Opt-Balanced
+
+S7:
+  accuracy:
+    weight: 0.00
+    base: 0.80
+    min: 0.70
+  ece:
+    weight: 0.00
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 8512
+  power:
+    weight: -1.00
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Power
+
+S8:
+  accuracy:
+    weight: 0.00
+    base: 0.80
+    min: 0.70
+  ece:
+    weight: 0.00
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 8512
+  power:
+    weight: 0.00
+    base: 1.80
+  # energy = dyn_power x max_ii x num_mc_samples (W.cycles per prediction).
+  energy:
+    weight: -1.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Energy
+
+S9:
+  accuracy:
+    weight: 0.20
+    base: 0.80
+    min: 0.70
+  ece:
+    weight: -0.20
+    base: 0.03
+  ape:
+    weight: 0.20
+    base: 1.5
+  flops:
+    weight: -0.20
+    base: 8512
+  power:
+    weight: -0.20
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Power-Balanced
+
+S11:
+  accuracy:
+    weight: 0.00
+    base: 0.80
+    min: 0.70
+  ece:
+    weight: -0.50
+    base: 0.03
+  ape:
+    weight: 0.00
+    base: 1.5
+  flops:
+    weight: 0.00
+    base: 8512
+  power:
+    weight: 0.50
+    base: 1.80
+  energy:
+    weight: 0.00
+    base: 800000
+
+  top_n: 3
+  name: Opt-Confidence-Power
+
+strategy:
+  strategies: [ S7 ]
+  curr_strategy: <int>
+  curr_results: ((bayes_opt.summary))
+
+  terminate_strategies: <bool>
+  results: <dict>
+  save_dir: ((experiment.save_dir))
+
+bayes_opt:
+  iteration: <int>
+  terminate: <bool>
+  engine: <obj>
+  score: <float>
+  summary: <list>
+
+  curr_strategy: <obj>
+
+  control:
+    params: dict
+    suggests: dict
+
+  num_iter: 100
+  seed: ((experiment.seed))
+  tunable:
+    dropout_rate:
+       value: ((model.dropout_rate))
+       space: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.80, 0.85, 0.90, 0.95]
+    p_rate:
+       value: ((model.p_rate))
+       space:  [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.80, 0.85, 0.90, 0.95]
+    num_bayes_layer:
+       value: ((model.num_bayes_layer))
+       space: [1, 2, 3]
+    scale_factor:
+       value: ((model.scale_factor))
+       space: [0.05, 0.1, 0.15, 0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.80, 0.85, 0.90, 0.95, 1.0]
+
+  metrics:
+    accuracy: ((eval.accuracy))
+    ece: ((eval.ece))
+    ape: ((eval.ape))
+    flops: ((eval.flops))
+    power: ((eval.power))
+    energy: ((eval.energy))
+
+train:
+  optimizer: <obj>
+  id: ((bayes_opt.iteration))
+  # Faithful hls4ml-tutorial recipe: Adam @ 1e-4, batch 1024, categorical
+  # cross-entropy, 25% validation split.
+  num_epoch: 10
+  batch_size: 1024
+  learning_rate: 0.0001
+  validation_split: 0.25
+
+eval:
+  ece: <float>
+  ape: <float>
+  accuracy: <float>
+  flops: <float>
+  power: <float>
+  energy: <float>
+
+  cached: <bool>
+
+  mc_samples: 5
+  num_eval_images: 200
+  num_bins: 10
+
+# hls4ml energy estimation config
+hls4ml:
+  num_mc_samples: ((eval.mc_samples))
+  hls_project_dir: <str>
+
+  max_ii: <int>
+  model_params: <int>
+  # Power proxy mode. Unset -> run the full Vivado power estimator. Set to one
+  # of ff | params | model_proxy to skip Vivado after HLS synthesis and return a
+  # cheap proxy instead. model_proxy keeps the DSE fast.
+  proxy: "model_proxy"
+
+  vivado_timeout: 86400
+
+  power_mode:
+    mode: "saif_synth"
+    num_samples: 6
+
+  hls_config:
+    precision: "ap_fixed<16,6>"
+    strategy: "Latency"               # Latency + io_parallel for small dense nets
+    io_type: "io_parallel"            # fully-connected -> parallel IO (no streaming)
+    clock_period: 5                   # ns (~200 MHz)
+    fpga_part: "xc7a100tcsg324-1"
+    # RF=1 fully unrolls the tiny dense layers (the hls4ml jet-tagger default).
+    # Pinned flat across DSE iterations so max(RF) stays constant.
+    reuse_factor: 1
+
+reporter:
+  log:
+    - bayes_opt.iteration
+    - dropout_rate_list
+    - p_rate
+    - num_bayes_layer
+    - scale_factor
+    - accuracy
+    - flops
+    - ece
+    - ape
+    - score
+    - power
+    - energy

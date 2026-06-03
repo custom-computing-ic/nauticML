@@ -114,6 +114,50 @@ class KerasTrain:
                          key=f"train-results-{ctx.train.id.get()}",
                          description="Training results")
 
+        elif ctx.model.name in ("jet", "tracking"):
+            # Fully-connected classifiers (Jet, Particle Tracking): plain
+            # tabular fit, no image augmentation. Mirrors the LeNet path
+            # (best-val-loss checkpoint, optional pruning-step callback,
+            # progress reporting), training on the standardised feature arrays.
+            chkp = ModelCheckpoint(
+                ctx.experiment.ckpt_file,
+                monitor="val_loss",
+                verbose=1,
+                save_best_only=True,
+                save_weights_only=False,
+                mode="auto",
+                save_freq="epoch",
+            )
+
+            if ctx.model.p_rate != 0.0:
+                callbacks = [chkp, pruning_callbacks.UpdatePruningStep()]
+            else:
+                callbacks = [chkp]
+
+            pg_id = log.artifact(
+                progress=0.0,
+                description=f"Performing training for {ctx.model.name}",
+            )
+
+            nepoch = ctx.train.num_epoch
+            callbacks.append(ProgressCallback())
+
+            def _fit_fc(m):
+                return m.fit(
+                    dataset['x_train'],
+                    dataset['y_train'],
+                    batch_size=ctx.train.batch_size,
+                    epochs=ctx.train.num_epoch,
+                    validation_split=ctx.train.validation_split,
+                    callbacks=callbacks)
+
+            train_stat = _fit_with_cpu_fallback(ctx, _fit_fc)
+
+            history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
+            log.artifact(table=history,
+                         key=f"train-results-{ctx.train.id.get()}",
+                         description="Training results")
+
         elif ctx.model.name == "resnet":
             datagen = ImageDataGenerator(
                 featurewise_center=False,  # set input mean to 0 over the dataset
