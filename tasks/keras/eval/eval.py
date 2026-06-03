@@ -16,6 +16,7 @@ from tasks.keras.trust.converter.dropout.mc_model import MonteCarloDropoutModel
 from tasks.keras.eval.power.power_eval import KerasEnergy
 from tasks.keras.eval.power.power_cache import PowerCache
 from tasks.keras.eval.cache_manager import get_cache
+from tasks.keras import device as dev
 
 class KerasEval:
 
@@ -36,12 +37,35 @@ class KerasEval:
 
         def get_model():
             if state["model"] is None:
-                state["model"] = load_model(ctx.experiment.ckpt_file, custom_objects=co)
+                with tf.device(dev.current_device()):
+                    state["model"] = load_model(ctx.experiment.ckpt_file, custom_objects=co)
             return state["model"]
+
+        def on_device_predict(predict_call):
+            """Run predict_call(model) on this iteration's device.
+
+            If the shared GPU dies mid-evaluation, pin the rest of the
+            iteration to CPU, reload the model there and retry — so a contended
+            GPU never fails the eval stage.
+            """
+            try:
+                with tf.device(dev.current_device()):
+                    return predict_call(get_model())
+            except (tf.errors.ResourceExhaustedError, tf.errors.InternalError) as e:
+                if dev.current_device() == dev.CPU:
+                    raise
+                ctx.log.warning(
+                    f"GPU eval failed ({type(e).__name__}: {e}). Retrying on CPU."
+                )
+                dev.fallback_to_cpu(ctx.log)
+                state["model"] = None  # force a fresh load on CPU
+                with tf.device(dev.CPU):
+                    return predict_call(get_model())
 
         def get_y_prob():
             if state["y_prob"] is None:
-                state["y_prob"] = get_model().predict(ctx.dataset.data["x_test"])
+                state["y_prob"] = on_device_predict(
+                    lambda m: m.predict(ctx.dataset.data["x_test"]))
             return state["y_prob"]
 
         ctx.eval.accuracy = KerasEval._cached(ctx, cache, "accuracy",
@@ -49,7 +73,7 @@ class KerasEval:
         ctx.eval.ece = KerasEval._cached(ctx, cache, "ece",
             lambda: KerasEval.evaluate_ece(ctx, get_y_prob()))
         ctx.eval.ape = KerasEval._cached(ctx, cache, "ape",
-            lambda: KerasEval.evaluate_ape(ctx, get_model()))
+            lambda: KerasEval.evaluate_ape(ctx, on_device_predict))
         ctx.eval.flops = KerasEval._cached(ctx, cache, "flops",
             lambda: KerasEval.evaluate_flops(ctx))
 
@@ -123,7 +147,7 @@ class KerasEval:
             
         return float(ece_keras)
 
-    def evaluate_ape(ctx, model) -> float:
+    def evaluate_ape(ctx, on_device_predict) -> float:
         def entropy(output):
             batch_size = output.shape[0]
             entropy = -np.sum(np.log(output+1e-8)*output)/batch_size
@@ -134,7 +158,8 @@ class KerasEval:
         # TODO: ask about mean - should be hard-coded?
         x_noise = np.random.normal(ctx.dataset.mean, ctx.dataset.std, size=x.shape).astype(x.dtype)
 
-        return entropy(model.predict(np.ascontiguousarray(x_noise)))
+        output = on_device_predict(lambda m: m.predict(np.ascontiguousarray(x_noise)))
+        return entropy(output)
 
     def evaluate_accuracy(ctx, y_prob):
         accuracy = float(accuracy_score(

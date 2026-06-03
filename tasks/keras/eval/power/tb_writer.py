@@ -7,6 +7,9 @@ import os
 import re
 
 import numpy as np
+import tensorflow as tf
+
+from tasks.keras import device as dev
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
@@ -317,7 +320,15 @@ class TestbenchWriter:
         n_samples = TestbenchWriter._n_saif_samples(ctx)
         x_sample = ctx.dataset.data["x_test"][:n_samples]
         x_sample = np.ascontiguousarray(x_sample.astype(np.float32))
-        y_sample = stripped_model.predict(x_sample)
+        # Run on this iteration's device; if the shared GPU dies on these few
+        # samples, retry on CPU so the energy stage can't fail.
+        try:
+            with tf.device(dev.current_device()):
+                y_sample = stripped_model.predict(x_sample)
+        except (tf.errors.ResourceExhaustedError, tf.errors.InternalError):
+            dev.fallback_to_cpu(getattr(ctx, "log", None))
+            with tf.device(dev.CPU):
+                y_sample = stripped_model.predict(x_sample)
 
         input_tb_path = os.path.join(project_dir, "input_features.npy")
         output_tb_path = os.path.join(project_dir, "output_predictions.npy")
