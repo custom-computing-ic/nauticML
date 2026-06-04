@@ -4,6 +4,7 @@ import shutil
 import tensorflow as tf
 from tensorflow.keras.callbacks import Callback
 from tensorflow.keras.callbacks import ModelCheckpoint
+from tensorflow.keras.callbacks import ReduceLROnPlateau
 from tensorflow_model_optimization.python.core.sparsity.keras import pruning_callbacks
 from nautic import taskx
 
@@ -129,10 +130,23 @@ class KerasTrain:
                 save_freq="epoch",
             )
 
+            # LR scheduler from the hls4ml tutorial recipe: halve the LR when
+            # val_loss plateaus. This (with Adam) is what the reference relies
+            # on to converge — Adam stays the optimizer, this just anneals its LR.
+            reduce_lr = ReduceLROnPlateau(
+                monitor="val_loss",
+                factor=0.5,
+                patience=10,
+                min_delta=1e-6,
+                cooldown=2,
+                min_lr=1e-7,
+                verbose=1,
+            )
+
             if ctx.model.p_rate != 0.0:
-                callbacks = [chkp, pruning_callbacks.UpdatePruningStep()]
+                callbacks = [chkp, reduce_lr, pruning_callbacks.UpdatePruningStep()]
             else:
-                callbacks = [chkp]
+                callbacks = [chkp, reduce_lr]
 
             pg_id = log.artifact(
                 progress=0.0,
