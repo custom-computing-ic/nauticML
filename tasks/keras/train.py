@@ -27,17 +27,6 @@ class KerasTrain:
         log = ctx.log
         dataset = ctx.dataset.data
 
-        # build_bayesian_model() wrapped ctx.model.logic in a
-        # MonteCarloDropoutModel. Rebuild the plain (unwrapped) model here so we
-        # train and checkpoint a clean Sequential/Functional model — MC sampling
-        # at eval still works via the inline BayesianDropout layers. This used to
-        # happen implicitly in the (now-removed) CPU branch of
-        # _fit_with_cpu_fallback; without it we were training/checkpointing the
-        # subclassed wrapper, which regressed accuracy and shifted the RNG state
-        # (hence the different DSE starting point).
-        from tasks.keras.model_factory import KerasModels
-        KerasModels.get_model(ctx)
-
         class ProgressCallback(Callback):
             def on_epoch_end(self, epoch, logs=None):
                 progress = (epoch / nepoch) * 100

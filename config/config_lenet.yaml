@@ -304,7 +304,7 @@ S11:
   name: Opt-Confidence-Power
 
 strategy:
-  strategies: [ S9 ]
+  strategies: [ S7 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -325,7 +325,7 @@ bayes_opt:
     params: dict
     suggests: dict
 
-  num_iter: 25
+  num_iter: 100
   seed: ((experiment.seed))
   tunable:
     dropout_rate:
@@ -388,7 +388,7 @@ hls4ml:
   #   ff          -> HLS FF estimate (pre_ff)
   #   params      -> synthesized model parameter count
   #   model_proxy -> pre_ff**2 * pre_interval_max**0.5
-  proxy: <str>
+  proxy: "model_proxy"
 
   vivado_timeout: 86400
 
