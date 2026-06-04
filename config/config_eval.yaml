@@ -19,8 +19,8 @@ model:
   logic: <obj>
   name: lenet
   is_quant: false
-  p_rate: 0.6
-  scale_factor: 0.5
+  p_rate: 0.3
+  scale_factor: 0.35
   dropout_rate: 0.05
   dropout_type: mc
   num_bayes_layer: 1
@@ -74,7 +74,7 @@ hls4ml:
     strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
     io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
     clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
-    fpga_part: "xczu7ev-ffvc1156-2-e" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
+    fpga_part: "xc7a100tcsg324-1" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
     # Pinned flat across all Dense/Conv layers so max(RF) stays constant
     # across DSE iterations (architecture varies but RF doesn't). Must be
     # >= every layer's min: at scale_factor=0.95, conv2d_2 needs >= 5*5*19=475

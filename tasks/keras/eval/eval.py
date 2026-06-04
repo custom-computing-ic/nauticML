@@ -1,12 +1,5 @@
 from nautic import taskx
 
-import os
-import re
-import sys
-import shutil
-import tempfile
-import subprocess
-
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras.models import load_model
@@ -23,7 +16,6 @@ from tasks.keras.trust.converter.dropout.mc_model import MonteCarloDropoutModel
 from tasks.keras.eval.power.power_eval import KerasEnergy
 from tasks.keras.eval.power.power_cache import PowerCache
 from tasks.keras.eval.cache_manager import get_cache
-from tasks.keras import device as dev
 
 class KerasEval:
 
@@ -44,35 +36,12 @@ class KerasEval:
 
         def get_model():
             if state["model"] is None:
-                with tf.device(dev.current_device()):
-                    state["model"] = load_model(ctx.experiment.ckpt_file, custom_objects=co)
+                state["model"] = load_model(ctx.experiment.ckpt_file, custom_objects=co)
             return state["model"]
-
-        def on_device_predict(predict_call):
-            """Run predict_call(model) on this iteration's device.
-
-            If the shared GPU dies mid-evaluation, pin the rest of the
-            iteration to CPU, reload the model there and retry — so a contended
-            GPU never fails the eval stage.
-            """
-            try:
-                with tf.device(dev.current_device()):
-                    return predict_call(get_model())
-            except dev.GPU_ERRORS as e:
-                if dev.current_device() == dev.CPU:
-                    raise
-                ctx.log.warning(
-                    f"GPU eval failed ({type(e).__name__}: {e}). Retrying on CPU."
-                )
-                dev.fallback_to_cpu(ctx.log)
-                state["model"] = None  # force a fresh load on CPU
-                with tf.device(dev.CPU):
-                    return predict_call(get_model())
 
         def get_y_prob():
             if state["y_prob"] is None:
-                state["y_prob"] = on_device_predict(
-                    lambda m: m.predict(ctx.dataset.data["x_test"]))
+                state["y_prob"] = get_model().predict(ctx.dataset.data["x_test"])
             return state["y_prob"]
 
         ctx.eval.accuracy = KerasEval._cached(ctx, cache, "accuracy",
@@ -80,7 +49,7 @@ class KerasEval:
         ctx.eval.ece = KerasEval._cached(ctx, cache, "ece",
             lambda: KerasEval.evaluate_ece(ctx, get_y_prob()))
         ctx.eval.ape = KerasEval._cached(ctx, cache, "ape",
-            lambda: KerasEval.evaluate_ape(ctx, on_device_predict))
+            lambda: KerasEval.evaluate_ape(ctx, get_model))
         ctx.eval.flops = KerasEval._cached(ctx, cache, "flops",
             lambda: KerasEval.evaluate_flops(ctx))
 
@@ -154,7 +123,7 @@ class KerasEval:
             
         return float(ece_keras)
 
-    def evaluate_ape(ctx, on_device_predict) -> float:
+    def evaluate_ape(ctx, get_model) -> float:
         def entropy(output):
             batch_size = output.shape[0]
             entropy = -np.sum(np.log(output+1e-8)*output)/batch_size
@@ -165,7 +134,7 @@ class KerasEval:
         # TODO: ask about mean - should be hard-coded?
         x_noise = np.random.normal(ctx.dataset.mean, ctx.dataset.std, size=x.shape).astype(x.dtype)
 
-        output = on_device_predict(lambda m: m.predict(np.ascontiguousarray(x_noise)))
+        output = get_model().predict(np.ascontiguousarray(x_noise))
         return entropy(output)
 
     def evaluate_accuracy(ctx, y_prob):
@@ -178,70 +147,25 @@ class KerasEval:
 
     def evaluate_flops(ctx):
         """
-        Calculate FLOPS for tf.keras.Model or tf.keras.Sequential .
+        Calculate FLOPS for tf.keras.Model or tf.keras.Sequential.
         Ignore operations used in only training mode such as Initialization.
 
-        The profiler path uses convert_variables_to_constants_v2_as_graph, which
-        builds a Grappler cluster that probes the GPU even under
-        tf.device('/CPU:0') and dies with UnknownError("Failed to create
-        session") on a contended shared GPU. To keep it off the GPU entirely we
-        run the count in a short-lived subprocess with CUDA_VISIBLE_DEVICES=""
-        (set before TF imports), which forces a CPU-only Grappler cluster and
-        yields identical numbers. See flops_worker.py.
+        Counted in-process via the TF v1 profiler. FLOPS is a soft metric, so
+        any failure is swallowed and reported as 0.0 rather than crashing the DSE.
         """
         model = ctx.model.original
-
-        tmpdir = tempfile.mkdtemp(prefix="flops_")
-        model_path = os.path.join(tmpdir, "model.h5")
-        worker = os.path.join(os.path.dirname(__file__), "flops_worker.py")
-        repo_root = os.path.abspath(
-            os.path.join(os.path.dirname(__file__), os.pardir, os.pardir, os.pardir)
-        )
         try:
-            model.save(model_path)
-
-            env = dict(os.environ)
-            env["CUDA_VISIBLE_DEVICES"] = ""  # GPU invisible to the subprocess
-            env["PYTHONPATH"] = repo_root + os.pathsep + env.get("PYTHONPATH", "")
-
-            proc = subprocess.run(
-                [sys.executable, worker, model_path],
-                cwd=repo_root, env=env,
-                capture_output=True, text=True, timeout=600,
+            inputs = [
+                tf.TensorSpec([1] + inp.shape[1:], inp.dtype)
+                for inp in model.inputs
+            ]
+            real_model = tf.function(model).get_concrete_function(inputs)
+            frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
+            run_meta = tf.compat.v1.RunMetadata()
+            opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
+            flops = tf.compat.v1.profiler.profile(
+                graph=frozen_func.graph, run_meta=run_meta, cmd="scope", options=opts
             )
-            match = re.search(r"FLOPS_RESULT=(\d+)", proc.stdout)
-            if match:
-                return int(match.group(1))
-
-            tail = "\n".join((proc.stdout + proc.stderr).splitlines()[-15:])
-            ctx.log.warning(
-                f"FLOPS subprocess returned no result (exit {proc.returncode}). "
-                f"Output tail:\n{tail}"
-            )
-        except Exception as e:
-            ctx.log.warning(
-                f"FLOPS subprocess failed ({type(e).__name__}: {e}). "
-                "Trying in-process on CPU."
-            )
-        finally:
-            shutil.rmtree(tmpdir, ignore_errors=True)
-
-        # Last resort: in-process count on CPU. This may still hit the
-        # Grappler/GPU issue on a contended machine, so swallow it and return
-        # 0.0 rather than crash the whole DSE — FLOPS is a soft metric.
-        try:
-            with tf.device(dev.CPU):
-                inputs = [
-                    tf.TensorSpec([1] + inp.shape[1:], inp.dtype)
-                    for inp in model.inputs
-                ]
-                real_model = tf.function(model).get_concrete_function(inputs)
-                frozen_func, _ = convert_variables_to_constants_v2_as_graph(real_model)
-                run_meta = tf.compat.v1.RunMetadata()
-                opts = tf.compat.v1.profiler.ProfileOptionBuilder.float_operation()
-                flops = tf.compat.v1.profiler.profile(
-                    graph=frozen_func.graph, run_meta=run_meta, cmd="scope", options=opts
-                )
             return flops.total_float_ops
         except Exception as e:
             ctx.log.error(

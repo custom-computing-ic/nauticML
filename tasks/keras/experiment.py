@@ -59,17 +59,9 @@ class KerasExperiment:
                 except RuntimeError as e:
                     print("❌ RuntimeError during GPU configuration:", e)
 
-                # On the shared accelerator hardware the selected GPU may be
-                # visible but unusable (out of memory, driver contention, etc.).
-                # We no longer probe-and-fall-back to CPU here: the GPU is only
-                # made visible now (after set_visible_devices it is remapped to
-                # /GPU:0 in TF's view). Actually acquiring it is deferred to
-                # each iteration's training, where it is retried before any CPU
-                # fallback — see tasks/keras/device.py (acquire_device) and
-                # _fit_with_cpu_fallback in train.py. This avoids permanently
-                # dropping to CPU just because the shared GPU happened to be
-                # busy at startup, and lets each iteration retry the GPU.
-                log.info("ℹ️ GPU acquisition deferred to training time (with retries).")
+                # The selected GPU is made visible here (after set_visible_devices
+                # it is remapped to /GPU:0 in TF's view); training and evaluation
+                # then run under TF's default device placement.
             else:
                 log.warning("⚠️ CPU used by default as no CPU or GPU indices provided are empty")
                 return configure_gpus(True, [])

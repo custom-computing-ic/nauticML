@@ -304,7 +304,7 @@ S11:
   name: Opt-Confidence-Power
 
 strategy:
-  strategies: [ S7 ]
+  strategies: [ S9 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -325,7 +325,7 @@ bayes_opt:
     params: dict
     suggests: dict
 
-  num_iter: 100
+  num_iter: 25
   seed: ((experiment.seed))
   tunable:
     dropout_rate:
@@ -388,7 +388,7 @@ hls4ml:
   #   ff          -> HLS FF estimate (pre_ff)
   #   params      -> synthesized model parameter count
   #   model_proxy -> pre_ff**2 * pre_interval_max**0.5
-  proxy: "model_proxy"
+  proxy: <str>
 
   vivado_timeout: 86400
 
@@ -401,7 +401,7 @@ hls4ml:
     strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
     io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
     clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
-    fpga_part: "xc7a100tcsg324-1" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
+    fpga_part: "xcku115-flvb2104-2-i" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
     # Pinned flat across all Dense/Conv layers so max(RF) stays constant
     # across DSE iterations (architecture varies but RF doesn't). Must be
     # >= every layer's min: at scale_factor=0.95, conv2d_2 needs >= 5*5*19=475

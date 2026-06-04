@@ -11,38 +11,7 @@ from nautic import taskx
 from tensorflow.keras.preprocessing.image import ImageDataGenerator
 
 from tasks.keras.svhn.utils import CosineAnnealingScheduler
-from tasks.keras import device as dev
 
-
-def _fit_with_cpu_fallback(ctx, fit_fn):
-    """Train this iteration on a GPU if one can be acquired, otherwise on CPU.
-
-    On the shared machine the chosen GPU may be busy, so ``dev.acquire_device``
-    retries it before giving up. The device it settles on is recorded so
-    evaluation in the same iteration runs there too. If the GPU can't be
-    acquired — or a GPU run dies with OOM — we fall back to CPU *for this
-    iteration only*; the next iteration is free to try the GPU again.
-    """
-    log = ctx.log
-    device = dev.acquire_device(log)
-
-    if device == dev.GPU:
-        try:
-            with tf.device(dev.GPU):
-                return fit_fn(ctx.model.logic)
-        except dev.GPU_ERRORS as e:
-            log.warning(
-                f"GPU training failed ({type(e).__name__}: {e}). "
-                "Falling back to CPU for this iteration."
-            )
-            dev.fallback_to_cpu(log)
-
-    # CPU path: rebuild the model so its variables live on CPU, then fit there.
-    # Local import to avoid a circular import at module load.
-    from tasks.keras.model_factory import KerasModels
-    with tf.device(dev.CPU):
-        KerasModels.get_model(ctx)
-        return fit_fn(ctx.model.logic)
 
 class KerasTrain:
     @taskx
@@ -57,6 +26,17 @@ class KerasTrain:
         """
         log = ctx.log
         dataset = ctx.dataset.data
+
+        # build_bayesian_model() wrapped ctx.model.logic in a
+        # MonteCarloDropoutModel. Rebuild the plain (unwrapped) model here so we
+        # train and checkpoint a clean Sequential/Functional model — MC sampling
+        # at eval still works via the inline BayesianDropout layers. This used to
+        # happen implicitly in the (now-removed) CPU branch of
+        # _fit_with_cpu_fallback; without it we were training/checkpointing the
+        # subclassed wrapper, which regressed accuracy and shifted the RNG state
+        # (hence the different DSE starting point).
+        from tasks.keras.model_factory import KerasModels
+        KerasModels.get_model(ctx)
 
         class ProgressCallback(Callback):
             def on_epoch_end(self, epoch, logs=None):
@@ -108,7 +88,7 @@ class KerasTrain:
                     validation_split=ctx.train.validation_split,
                     callbacks=callbacks)
 
-            train_stat = _fit_with_cpu_fallback(ctx, _fit_lenet)
+            train_stat = _fit_lenet(ctx.model.logic)
 
             history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
             log.artifact(table=history,
@@ -165,7 +145,7 @@ class KerasTrain:
                     validation_split=ctx.train.validation_split,
                     callbacks=callbacks)
 
-            train_stat = _fit_with_cpu_fallback(ctx, _fit_fc)
+            train_stat = _fit_fc(ctx.model.logic)
 
             history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
             log.artifact(table=history,
@@ -219,7 +199,7 @@ class KerasTrain:
                     validation_data=(dataset['x_val'], dataset['y_val']),
                     )
 
-            train_stat = _fit_with_cpu_fallback(ctx, _fit_resnet)
+            train_stat = _fit_resnet(ctx.model.logic)
 
             history = {k: [float(v) for v in vals] for k, vals in train_stat.history.items()}
             log.artifact(table=history,
