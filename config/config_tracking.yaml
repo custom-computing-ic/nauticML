@@ -175,8 +175,8 @@ S6:
 S7:
   accuracy:
     weight: 0.00
-    base: 0.85
-    min: 0.70
+    base: 0.95
+    min: 0.80
   ece:
     weight: 0.00
     base: 0.03
@@ -224,7 +224,7 @@ S9:
   accuracy:
     weight: 0.20
     base: 0.85
-    min: 0.70
+    min: 0.50
   ece:
     weight: -0.20
     base: 0.03
@@ -356,8 +356,8 @@ hls4ml:
     strategy: "Latency"
     io_type: "io_parallel"
     clock_period: 5
-    fpga_part: "xc7a100tcsg324-1"
-    reuse_factor: 1
+    fpga_part: "xczu7ev-ffvc1156-2-e"
+    # reuse_factor: 1
 
 reporter:
   log:

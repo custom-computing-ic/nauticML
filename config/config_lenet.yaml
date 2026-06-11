@@ -291,7 +291,10 @@ S11:
     weight: 0.00
     base: 5340192
   power:
-    weight: 0.50
+    weight: -0.50
+    # base: 13797416414754017
+    # base: 460800
+    # base: 16066
     base: 1.80
   # energy = dyn_power × max_ii × num_mc_samples (W·cycles per prediction).
   # Proportional to joules at fixed clock_period. Base ~500k is the order
@@ -304,7 +307,7 @@ S11:
   name: Opt-Confidence-Power
 
 strategy:
-  strategies: [ S7 ]
+  strategies: [ S11 ]
   curr_strategy: <int>
   curr_results: ((bayes_opt.summary))
 
@@ -325,7 +328,7 @@ bayes_opt:
     params: dict
     suggests: dict
 
-  num_iter: 100
+  num_iter: 25
   seed: ((experiment.seed))
   tunable:
     dropout_rate:
@@ -368,7 +371,6 @@ eval:
   power: <float>
   energy: <float>
 
-  # set True by eval.probe_cache when the whole point is already cached
   cached: <bool>
 
   mc_samples: 5
@@ -379,7 +381,6 @@ eval:
 hls4ml:
   num_mc_samples: ((eval.mc_samples))
   hls_project_dir: <str>
-
   max_ii: <int>
   model_params: <int>
   # Power proxy mode. Unset -> run the Vivado power estimator. Set to one of
@@ -388,7 +389,7 @@ hls4ml:
   #   ff          -> HLS FF estimate (pre_ff)
   #   params      -> synthesized model parameter count
   #   model_proxy -> pre_ff**2 * pre_interval_max**0.5
-  proxy: "model_proxy"
+  proxy: <str>
 
   vivado_timeout: 86400
 
@@ -401,12 +402,12 @@ hls4ml:
     strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
     io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
     clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
-    fpga_part: "xcku115-flvb2104-2-i" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
+    fpga_part: "xczu7ev-ffvc1156-2-e" # xczu7ev-ffvc1156-2-e normally,  xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
     # Pinned flat across all Dense/Conv layers so max(RF) stays constant
     # across DSE iterations (architecture varies but RF doesn't). Must be
     # >= every layer's min: at scale_factor=0.95, conv2d_2 needs >= 5*5*19=475
     # for the io_stream Resource constraint. 500 covers up to scale_factor=1.0.
-    reuse_factor: 500
+    # reuse_factor: 500
   
 
 reporter:

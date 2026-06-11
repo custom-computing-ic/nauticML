@@ -123,15 +123,6 @@ class HLSBuilder:
             stripped_model, granularity="name"
         )
 
-        # Compute each layer's natural min RF (existing per-layer logic). For
-        # the worst layer(s), pin to the closest valid RF to the configured
-        # target — "valid" means a divisor of total weights >= natural_rf,
-        # which is what hls4ml's io_stream Resource strategy will accept.
-        # Smaller layers keep their natural RF and stay efficient.
-        # max(RF) will be near the config target (not exactly) but won't
-        # cause hls4ml synthesis errors at architectures where the target
-        # doesn't happen to be a valid divisor.
-        target_rf = ctx.hls4ml.hls_config.reuse_factor
         fpga_part = ctx.hls4ml.hls_config.fpga_part
 
         natural_rfs = {
@@ -140,30 +131,12 @@ class HLSBuilder:
             if layer.name in hls_config["LayerName"]
         }
 
-        worst_rf = max(natural_rfs.values()) if natural_rfs else 0
-        if worst_rf > target_rf:
-            worst_layer = max(natural_rfs, key=natural_rfs.get)
-            ctx.log.warning(
-                f"Configured reuse_factor={target_rf} is below worst-layer "
-                f"natural min RF: {worst_layer!r} requires {worst_rf}. "
-                f"Using natural minimum; max(RF) for this iteration will "
-                f"be {worst_rf}, not {target_rf}."
-            )
 
         for layer in stripped_model.layers:
             if layer.name not in hls_config["LayerName"]:
                 continue
 
-            natural_rf = natural_rfs[layer.name]
-            if natural_rf == worst_rf:
-                rf = HLSBuilder._closest_valid_rf(layer, target_rf, natural_rf)
-                if rf != target_rf:
-                    ctx.log.info(
-                        f"Pinned {layer.name!r} RF={rf} (target={target_rf}, "
-                        f"natural={natural_rf}, closest valid divisor)"
-                    )
-            else:
-                rf = natural_rf
+            rf = natural_rfs[layer.name]
             hls_config["LayerName"][layer.name]["ReuseFactor"] = rf
 
             # Pin accumulator/result precision so hls4ml doesn't auto-widen.

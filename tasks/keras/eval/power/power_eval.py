@@ -18,7 +18,7 @@ VIVADO_TIMEOUT = 8 * 60 * 60 # 8 hour default timeout
 TCL_SCRIPT = Path(__file__).parent / "tcl_scripts" / "full_power.tcl"
 
 # Valid values for the hls4ml.proxy knob (see KerasEnergy.compute_proxy).
-PROXY_MODES = ("ff", "params", "model_proxy")
+PROXY_MODES = ("ff", "params", "model_proxy", "dsp")
 
 
 def _unwrap(val):
@@ -254,19 +254,25 @@ class KerasEnergy:
                 raise ValueError("proxy 'params': model_params not available on ctx")
             return float(params)
 
-        pre_ff, pre_interval_max = KerasEnergy.extract_csynth_estimates(ctx)
+        pre_ff, pre_dsp, pre_interval_max = KerasEnergy.extract_csynth_estimates(ctx)
 
         if mode == "ff":
             if pre_ff is None:
                 raise ValueError("proxy 'ff': could not read FF from csynth report")
             return float(pre_ff)
+    
+        if mode == "dsp":
+            if pre_dsp is None:
+                raise ValueError("proxy 'dsp': could not read DSP from csynth report")
+            return float(pre_dsp)
+
 
         if mode == "model_proxy":
             if pre_ff is None or pre_interval_max is None:
                 raise ValueError(
                     "proxy 'model_proxy': missing pre_ff/pre_interval_max in csynth report"
                 )
-            return (float(pre_ff) / 460800) ** 2 * float(pre_interval_max) ** 0.5
+            return (float(pre_ff)) ** 2 * float(pre_interval_max) ** 0.5
 
         raise ValueError(f"Unknown proxy mode: {mode!r}")
 
@@ -293,10 +299,12 @@ class KerasEnergy:
             return el.text if el is not None and el.text else None
 
         ff = _txt(".//AreaEstimates/Resources/FF")
+        dsp =  _txt(".//AreaEstimates/Resources/DSP")
         interval_max = _txt(".//PerformanceEstimates/SummaryOfOverallLatency/Interval-max")
 
         return (
             float(ff) if ff is not None else None,
+            float(dsp) if dsp is not None else None,
             float(interval_max) if interval_max is not None else None,
         )
 

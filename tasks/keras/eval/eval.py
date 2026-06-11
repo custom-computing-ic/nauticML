@@ -53,7 +53,13 @@ class KerasEval:
         ctx.eval.flops = KerasEval._cached(ctx, cache, "flops",
             lambda: KerasEval.evaluate_flops(ctx))
 
+        # if ctx.bayes_opt.curr_strategy.power.weight != 0:
         KerasEnergy.evaluate_energy(ctx, get_model)
+        # else:
+            # TODO: should be None, but beyond the scope really, to adapt bayes opt so that
+            # when None but 0 weight it just skip the evaluation metric
+            # ctx.eval.power = 0
+            # ctx.eval.energy = 0
         # TODO: decouple these evaluations with a map of things to update and the acc function, and do the same in bayes opt for logging
         # TODO: decouple also the pareto frontier
         # TODO: add also latency to the pareto front generated

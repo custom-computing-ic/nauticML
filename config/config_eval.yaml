@@ -2,11 +2,20 @@
 
 experiment:
   seed: 42
-  save_dir: ./prj/exp_mnist_bayes_lenet_try
-  save_model: mnist_bayes_lenet_10samples_mc
   cpu: True
-  ckpt_file: best_chkp.tf
   id: 0
+
+  save_dir: ./prj/exp_mnist_bayes_lenet_try_eval
+  save_model: mnist_bayes_lenet_10samples_mc_eval
+  ckpt_file: best_chkp.tf
+
+  # save_dir: ./prj/exp_jet_bayes
+  # save_model: jet_bayes_mc
+  # ckpt_file: best_chkp.tf
+
+  # save_dir: ./prj/exp_tracking_bayes_eval
+  # save_model: tracking_bayes_mc_eval
+  # ckpt_file: best_chkp.tf
 
 dataset:
   name: mnist
@@ -14,13 +23,23 @@ dataset:
   mean: 0.0
   std: 1.0
 
+  # name: jets
+  # data: <dict>
+  # mean: 0.0
+  # std: 1.0
+
+  # name: tracking
+  # data: <dict>
+  # mean: 0.0
+  # std: 1.0
+
 model:
   original: <obj>
   logic: <obj>
   name: lenet
   is_quant: false
-  p_rate: 0.3
-  scale_factor: 0.35
+  p_rate: 0.15
+  scale_factor: 0.65
   dropout_rate: 0.05
   dropout_type: mc
   num_bayes_layer: 1
@@ -28,10 +47,23 @@ model:
 train:
   optimizer: <obj>
   id: ((experiment.id))
+  #LeNet eval
   num_epoch: 3
   batch_size: 128
   learning_rate: 0.01
   validation_split: 0.1
+
+# Jet eval
+  # num_epoch: 5
+  # batch_size: 1024
+  # learning_rate: 0.001
+  # validation_split: 0.25
+
+#Tracking eval
+  # num_epoch: 30
+  # batch_size: 1024
+  # learning_rate: 0.001
+  # validation_split: 0.2
 
 eval:
   ece: <float>
@@ -74,12 +106,12 @@ hls4ml:
     strategy: "Resource"              # Resource or Latency (wa-hls4ml §2.1.1)
     io_type: "io_stream"              # io_stream for CNNs (wa-hls4ml §2.1.1)
     clock_period: 5                   # ns (HEART 2025 Table 2: 5ns = ~200MHz)
-    fpga_part: "xc7a100tcsg324-1" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
+    fpga_part: "xczu7ev-ffvc1156-2-e" # xcku115-flvb2104-2-i for HEART 25', xc7a100tcsg324-1 for different FPGA
     # Pinned flat across all Dense/Conv layers so max(RF) stays constant
     # across DSE iterations (architecture varies but RF doesn't). Must be
     # >= every layer's min: at scale_factor=0.95, conv2d_2 needs >= 5*5*19=475
     # for the io_stream Resource constraint. 500 covers up to scale_factor=1.0.
-    reuse_factor: 500
+    # reuse_factor: 500
   
 
 reporter:

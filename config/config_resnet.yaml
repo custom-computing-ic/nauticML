@@ -310,7 +310,7 @@ hls4ml:
     # the deepest ResNet18 block (8 × int(64*0.95) channels) needs
     # >= 3*3*8*60 = 4320 for the io_stream Resource constraint. 4500 covers
     # up to scale_factor=0.95 with a small margin.
-    reuse_factor: 4500
+    # reuse_factor: 4500
 
 
 reporter:
