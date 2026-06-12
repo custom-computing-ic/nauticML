@@ -38,8 +38,8 @@ model:
   logic: <obj>
   name: lenet
   is_quant: false
-  p_rate: 0.15
-  scale_factor: 0.65
+  p_rate: 0.55
+  scale_factor: 0.35
   dropout_rate: 0.05
   dropout_type: mc
   num_bayes_layer: 1
